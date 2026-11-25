@@ -1,8 +1,10 @@
 // Which package manager a project uses, and the release-age cooldown of one
-// whose setting npm-check-updates doesn't read itself (Bun's). Pure functions
-// over file contents and names, so the tests need no files.
+// whose setting npm-check-updates doesn't read itself (Bun's, and Yarn's
+// without yarn.lock). Pure functions over file contents and names, so the
+// tests need no files.
 
 import { parse } from "smol-toml";
+import { parse as parseYaml } from "yaml";
 import { isRecord, parseManifest } from "./manifests.ts";
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
@@ -10,8 +12,14 @@ export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 /** A release-age cooldown: how old a release must be before it's installed. */
 export interface Cooldown {
   minutes: number;
-  /** Package names it doesn't apply to. */
+  /** Package names it doesn't apply to, or with `globs`, patterns of them. */
   exclude: string[];
+  /**
+   * Whether `exclude` holds glob patterns ("@types/*"), as Yarn's
+   * npmPreapprovedPackages does, rather than names, as Bun's
+   * minimumReleaseAgeExcludes does.
+   */
+  globs?: boolean;
 }
 
 const PACKAGE_MANAGERS: readonly string[] = ["npm", "pnpm", "yarn", "bun"];
@@ -20,7 +28,8 @@ const isPackageManager = (name: string): name is PackageManager => PACKAGE_MANAG
 
 // The files at the root that tell, in this order: each one's lockfiles, then
 // the config files only one of them reads. Yarn 1 writes yarn.lock too, and
-// .yarnrc.yml is Yarn 2 and later's.
+// .yarnrc.yml is Yarn 2 and later's. bunfig.toml counts only when it
+// configures installs (see configuresInstall).
 const LOCKFILES: [file: string, packageManager: PackageManager][] = [
   ["pnpm-lock.yaml", "pnpm"],
   ["yarn.lock", "yarn"],
@@ -61,6 +70,28 @@ export function detectPackageManager(
   return "npm";
 }
 
+// bunfig.toml's [install] table, or {} without one.
+function installTable(bunfig: string | undefined): Record<string, unknown> {
+  const install = bunfig === undefined ? undefined : parse(bunfig)["install"];
+  return isRecord(install) ? install : {};
+}
+
+/**
+ * Whether a bunfig.toml may configure Bun's package manager: has an
+ * `[install]` table. One without configures only Bun's runtime or test runner
+ * (a project can run `bun test` and install with npm), so it doesn't say Bun
+ * installs. One that isn't TOML may, so it counts: in a Bun project, reading
+ * its cooldown then says what's wrong with it.
+ */
+export function configuresInstall(bunfig: string | undefined): boolean {
+  if (bunfig === undefined) return false;
+  try {
+    return isRecord(parse(bunfig)["install"]);
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Bun's release-age cooldown, from the `[install]` table of bunfig.toml
  * files, the project's first and then the global one: `minimumReleaseAge`
@@ -70,10 +101,7 @@ export function detectPackageManager(
  * number and a list of names.
  */
 export function bunCooldown(...bunfigs: (string | undefined)[]): Cooldown | undefined {
-  const installs = bunfigs.map((bunfig) => {
-    const install = bunfig === undefined ? undefined : parse(bunfig)["install"];
-    return isRecord(install) ? install : {};
-  });
+  const installs = bunfigs.map(installTable);
   const setting = (key: string): unknown =>
     installs.find((install) => install[key] !== undefined)?.[key];
   const seconds = setting("minimumReleaseAge");
@@ -86,4 +114,46 @@ export function bunCooldown(...bunfigs: (string | undefined)[]): Cooldown | unde
     throw new Error("install.minimumReleaseAgeExcludes must be a list of package names");
   }
   return { minutes: seconds / 60, exclude };
+}
+
+// A duration as npm-check-updates reads npmMinimalAgeGate's: "3d", "12h", "30m".
+const DURATION = /^(\d+(?:\.\d+)?)(d|h|m)$/;
+const DURATION_MINUTES: Record<string, number> = { d: 24 * 60, h: 60, m: 1 };
+
+// npmMinimalAgeGate in minutes, if it's a positive number of them or duration.
+function gateMinutes(gate: unknown): number | undefined {
+  if (typeof gate === "number") return Number.isFinite(gate) && gate > 0 ? gate : undefined;
+  const match = typeof gate === "string" ? DURATION.exec(gate) : null;
+  const [, amount, unit] = match ?? [];
+  if (amount === undefined || unit === undefined) return undefined;
+  const minutes = Number(amount) * (DURATION_MINUTES[unit] ?? 0);
+  return minutes > 0 ? minutes : undefined;
+}
+
+/**
+ * Yarn's release-age cooldown, from .yarnrc.yml files, the project's first
+ * and then the home directory's, read as npm-check-updates reads them next to
+ * a lockfile: `npmMinimalAgeGate` (minutes, or a duration such as "3d") and
+ * `npmPreapprovedPackages` (names or globs it doesn't apply to), both from
+ * the first file whose gate is positive. A file that isn't YAML is passed
+ * over, as it is there. Undefined when no file sets a gate.
+ */
+export function yarnCooldown(...yarnrcs: (string | undefined)[]): Cooldown | undefined {
+  for (const yarnrc of yarnrcs) {
+    let config: unknown;
+    try {
+      config = yarnrc === undefined ? undefined : parseYaml(yarnrc);
+    } catch {
+      continue;
+    }
+    if (!isRecord(config)) continue;
+    const minutes = gateMinutes(config["npmMinimalAgeGate"]);
+    if (minutes === undefined) continue;
+    const preapproved = config["npmPreapprovedPackages"];
+    const exclude = Array.isArray(preapproved)
+      ? preapproved.filter((name): name is string => typeof name === "string")
+      : [];
+    return { minutes, exclude, globs: true };
+  }
+  return undefined;
 }

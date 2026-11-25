@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { bunCooldown, detectPackageManager, MARKER_FILES } from "../src/packageManager.ts";
+import {
+  bunCooldown,
+  configuresInstall,
+  detectPackageManager,
+  MARKER_FILES,
+  yarnCooldown,
+} from "../src/packageManager.ts";
 
 const detect = (manifest: object | undefined, ...files: string[]) =>
   detectPackageManager(
@@ -91,5 +97,52 @@ describe("bunCooldown", () => {
       /list of package names/,
     );
     assert.throws(() => bunCooldown("[install\n"));
+  });
+});
+
+describe("configuresInstall", () => {
+  it("is whether bunfig.toml has an [install] table, or isn't TOML", () => {
+    assert.equal(configuresInstall("[install]\n"), true);
+    assert.equal(configuresInstall("install.exact = true\n"), true);
+    assert.equal(configuresInstall("[test]\npreload = ['./setup.ts']\n"), false);
+    assert.equal(configuresInstall(""), false);
+    assert.equal(configuresInstall(undefined), false);
+    // Whether it does can't be told, so it may.
+    assert.equal(configuresInstall("[install\n"), true);
+  });
+});
+
+describe("yarnCooldown", () => {
+  it("reads npmMinimalAgeGate, in minutes or as a duration, and npmPreapprovedPackages", () => {
+    assert.deepEqual(
+      yarnCooldown('npmMinimalAgeGate: 1440\nnpmPreapprovedPackages: ["@types/*", 1]\n'),
+      { minutes: 1440, exclude: ["@types/*"], globs: true },
+    );
+    assert.deepEqual(yarnCooldown("npmMinimalAgeGate: 3d\n"), {
+      minutes: 4320,
+      exclude: [],
+      globs: true,
+    });
+    assert.deepEqual(yarnCooldown("npmMinimalAgeGate: 12h\n")?.minutes, 720);
+  });
+
+  it("takes both from the first file with a positive gate, as npm-check-updates does", () => {
+    const home = "npmMinimalAgeGate: 60\nnpmPreapprovedPackages: [foo]\n";
+    assert.deepEqual(yarnCooldown("npmPreapprovedPackages: [bar]\n", home), {
+      minutes: 60,
+      exclude: ["foo"],
+      globs: true,
+    });
+    assert.deepEqual(yarnCooldown("npmMinimalAgeGate: 0\n", home)?.minutes, 60);
+    assert.deepEqual(yarnCooldown("{", home)?.minutes, 60);
+    assert.deepEqual(yarnCooldown(undefined, home)?.minutes, 60);
+  });
+
+  it("is undefined without a file or a positive gate", () => {
+    assert.equal(yarnCooldown(undefined, undefined), undefined);
+    assert.equal(yarnCooldown(""), undefined);
+    assert.equal(yarnCooldown("npmMinimalAgeGate: 0\n"), undefined);
+    assert.equal(yarnCooldown("npmMinimalAgeGate: 1w\n"), undefined);
+    assert.equal(yarnCooldown("npmMinimalAgeGate: .inf\n"), undefined);
   });
 });

@@ -24,8 +24,10 @@ import {
 import { newerReleases, type NcuOptions, type NcuQuery, type Upgrades } from "./ncu.ts";
 import {
   bunCooldown,
+  configuresInstall,
   detectPackageManager,
   MARKER_FILES,
+  yarnCooldown,
   type Cooldown,
 } from "./packageManager.ts";
 import { defaultCooldownConfig } from "./pnpm.ts";
@@ -34,6 +36,7 @@ const byName = (a: { name: string }, b: { name: string }): number => (a.name < b
 
 const PNPM_WORKSPACE = "pnpm-workspace.yaml";
 const BUNFIG = "bunfig.toml";
+const YARNRC = ".yarnrc.yml";
 
 /**
  * Where catalogs are defined, by file: pnpm's and Yarn's own files, and
@@ -42,7 +45,7 @@ const BUNFIG = "bunfig.toml";
  */
 const CATALOGS: [file: string, specs: (text: string | undefined) => Specs][] = [
   [PNPM_WORKSPACE, catalogSpecs],
-  [".yarnrc.yml", catalogSpecs],
+  [YARNRC, catalogSpecs],
   ["package.json", manifestCatalogSpecs],
 ];
 
@@ -134,10 +137,31 @@ function parsing<T>(where: string, parse: () => T): T {
  */
 function bunCooldownAt(root: string): Cooldown {
   const global = join(process.env["XDG_CONFIG_HOME"] || homedir(), ".bunfig.toml");
-  const globalText = existsSync(global) ? readFileSync(global, "utf8") : undefined;
-  const where = globalText === undefined ? BUNFIG : `${BUNFIG} or ${global}`;
-  const cooldown = parsing(where, () => bunCooldown(inWorkingTree(root, BUNFIG), globalText));
+  const hasGlobal = existsSync(global);
+  const where = hasGlobal ? `${BUNFIG} or ${global}` : BUNFIG;
+  // Read in parsing() too, so one that can't be read (a directory, say) is named.
+  const cooldown = parsing(where, () =>
+    bunCooldown(inWorkingTree(root, BUNFIG), hasGlobal ? readFileSync(global, "utf8") : undefined),
+  );
   return cooldown ?? { minutes: 0, exclude: [] };
+}
+
+/**
+ * Yarn's cooldown in a project without yarn.lock at the root.
+ * npm-check-updates reads .yarnrc.yml only next to the nearest lockfile, up
+ * from the root, so it would miss the project's (or read another
+ * directory's): read here as it reads them, the project's .yarnrc.yml, else
+ * ~/.yarnrc.yml. It's passed even when unset, so npm-check-updates doesn't
+ * look for one of its own.
+ */
+function yarnCooldownAt(root: string): Cooldown {
+  let home: string | undefined;
+  try {
+    home = readFileSync(join(homedir(), YARNRC), "utf8");
+  } catch {
+    // None, or unreadable: npm-check-updates passes it over too.
+  }
+  return yarnCooldown(inWorkingTree(root, YARNRC), home) ?? { minutes: 0, exclude: [] };
 }
 
 function outdatedIn(
@@ -295,12 +319,20 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
     );
   }
   const present = new Set(MARKER_FILES.filter((file) => existsSync(join(root, file))));
+  // Only one with an [install] table says Bun installs the packages.
+  if (present.has(BUNFIG) && !configuresInstall(now(BUNFIG))) present.delete(BUNFIG);
   const packageManager = parsing("package.json", () => detectPackageManager(rootManifest, present));
   const isPnpm = packageManager === "pnpm";
-  // npm-check-updates reads the others' cooldowns itself, but not Bun's. It's
-  // passed even when unset: given none, npm-check-updates would take npm's
-  // min-release-age from .npmrc, which Bun doesn't read.
-  const cooldown = packageManager === "bun" ? bunCooldownAt(root) : undefined;
+  // npm-check-updates reads the others' cooldowns itself, but not Bun's, nor
+  // Yarn's without yarn.lock. Bun's is passed even when unset: given none,
+  // npm-check-updates would take npm's min-release-age from .npmrc, which Bun
+  // doesn't read.
+  const cooldown =
+    packageManager === "bun"
+      ? bunCooldownAt(root)
+      : packageManager === "yarn" && !present.has("yarn.lock")
+        ? yarnCooldownAt(root)
+        : undefined;
   const patterns = parsing(`the workspace packages in package.json or ${PNPM_WORKSPACE}`, () =>
     workspacePatterns(rootManifest, workspace),
   );

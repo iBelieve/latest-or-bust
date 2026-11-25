@@ -101,7 +101,29 @@ function bunProject(manifest: object, install = ""): void {
   });
 }
 
+/** A project without a lockfile: package.json is `manifest`, and `files` are written besides. */
+function bareProject(manifest: object, files: Record<string, string> = {}): void {
+  repo.write({ ".npmrc": `registry=${registry.url}\n`, ...files, "package.json": manifest });
+}
+
 const run = (base: string): Promise<CheckResult> => check({ root: repo.root, base });
+
+/**
+ * `run`, with a throwaway home directory: Yarn's user .yarnrc.yml is
+ * ~/.yarnrc.yml, and the machine's mustn't change what the tests find.
+ */
+async function runAtHome(base: string): Promise<CheckResult> {
+  const saved = { HOME: process.env["HOME"], USERPROFILE: process.env["USERPROFILE"] };
+  process.env["HOME"] = process.env["USERPROFILE"] = configHome;
+  try {
+    return await run(base);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
 
 /** The outdated dependencies, as "file name spec → latest". */
 const outdated = (result: CheckResult): string[] =>
@@ -344,6 +366,13 @@ describe("check", () => {
       }
     });
 
+    it("applies to a project that names pnpm only in packageManager", async () => {
+      bareProject({ packageManager: "pnpm@11.0.0", dependencies: {} });
+      const base = repo.commit();
+      bareProject({ packageManager: "pnpm@11.0.0", dependencies: { foo: "1.2.0" } });
+      assert.deepEqual(outdated(await run(base)), []);
+    });
+
     it("doesn't apply before pnpm 11", async () => {
       assert.deepEqual(await addFoo("10.28.0"), ["package.json foo 1.2.0 → 1.3.0"]);
     });
@@ -499,7 +528,7 @@ describe("check", () => {
     yarnProject("catalog:\n  foo: 1.1.0\ncatalogs:\n  legacy:\n    '@scope/bar': ^1.0.0\n", {
       "package.json": { name: "root", dependencies: { foo: "1.2.0" } },
     });
-    const result = await run(base);
+    const result = await runAtHome(base);
     assert.deepEqual(
       result.checked,
       new Map([
@@ -513,6 +542,30 @@ describe("check", () => {
       ".yarnrc.yml @scope/bar ^1.0.0 → ^2.0.0",
     ]);
     assert.equal(result.outdated[1]?.catalog, "legacy");
+  });
+
+  it("honors .yarnrc.yml's npmMinimalAgeGate and npmPreapprovedPackages without yarn.lock", async () => {
+    const yarnrc = { ".yarnrc.yml": "npmMinimalAgeGate: 1d\nnpmPreapprovedPackages: ['h*']\n" };
+    bareProject({ packageManager: "yarn@4.12.0", dependencies: {} }, yarnrc);
+    const base = repo.commit();
+    bareProject(
+      { packageManager: "yarn@4.12.0", dependencies: { foo: "1.2.0", hot: "1.0.0" } },
+      yarnrc,
+    );
+    // Not foo's 1.3.0, younger than the gate; hot's 1.1.0 is preapproved.
+    assert.deepEqual(outdated(await runAtHome(base)), ["package.json hot 1.0.0 → 1.1.0"]);
+  });
+
+  it("takes a bunfig.toml without [install] for Bun's runtime, not its package manager", async () => {
+    const files = {
+      ".npmrc": `registry=${registry.url}\nmin-release-age=1\n`,
+      "bunfig.toml": "[test]\npreload = ['./setup.ts']\n",
+    };
+    bareProject({ dependencies: {} }, files);
+    const base = repo.commit();
+    bareProject({ dependencies: { foo: "1.2.0" } }, files);
+    // An npm project, so .npmrc's min-release-age applies: 1.3.0 is younger.
+    assert.deepEqual(outdated(await run(base)), []);
   });
 
   it("honors Bun's minimumReleaseAge and its exclusions, from bunfig.toml", async () => {

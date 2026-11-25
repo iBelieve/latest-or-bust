@@ -2,16 +2,17 @@
 // run as its own command line, not through its module API, so it reads the
 // registry settings (.npmrc) and the package manager's release-age cooldown
 // (npm's min-release-age, pnpm's minimumReleaseAge, Yarn's
-// npmMinimalAgeGate; Bun's it's given) just as `ncu` does. It's
-// given a config file of its own, so a project's .ncurc can't change
-// what it does: latest-or-bust.json (config.ts) is latest-or-bust's config.
+// npmMinimalAgeGate; Bun's, and Yarn's without yarn.lock, it's given) just as
+// `ncu` does. It's given a config file of its own, so a project's .ncurc
+// can't change what it does: latest-or-bust.json (config.ts) is
+// latest-or-bust's config.
 // That config file, ncurc.mjs, also reports which packages it could look up.
 
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { Readable } from "node:stream";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRecord, type Specs } from "./manifests.ts";
 import type { Cooldown, PackageManager } from "./packageManager.ts";
@@ -44,7 +45,7 @@ export interface NcuOptions {
   packageManager: PackageManager;
   /**
    * The package manager's cooldown, for one whose setting npm-check-updates
-   * doesn't read itself (Bun's).
+   * doesn't read itself (Bun's, and Yarn's without yarn.lock at the root).
    */
   cooldown?: Cooldown;
   /**
@@ -169,13 +170,18 @@ function upgradesOf(value: unknown): Upgrades {
  */
 function withCooldown(names: string[], cooldown: Cooldown | undefined): [string[], string[]][] {
   if (cooldown === undefined) return [[names, []]];
-  const exclude = new Set(cooldown.exclude);
+  if (cooldown.minutes === 0) return [[names, ["--cooldown", "0"]]];
+  const { exclude, globs } = cooldown;
+  const excluded = (name: string): boolean =>
+    globs === true
+      ? exclude.some((pattern) => posix.matchesGlob(name, pattern))
+      : exclude.includes(name);
   // A bare number of days, which npm-check-updates parses as a JavaScript
   // number: "<n>m" takes only plain decimals, not String()'s "1e-9".
   const days = String(cooldown.minutes / (24 * 60));
   return [
-    [names.filter((name) => !exclude.has(name)), ["--cooldown", days]],
-    [names.filter((name) => exclude.has(name)), ["--cooldown", "0"]],
+    [names.filter((name) => !excluded(name)), ["--cooldown", days]],
+    [names.filter((name) => excluded(name)), ["--cooldown", "0"]],
   ];
 }
 

@@ -6,10 +6,11 @@ it's below 1.0, a minor version may change behaviour.
 ## Unreleased
 
 - Yarn and Bun projects. The package manager is the one `package.json`'s `packageManager` names,
-  else the one whose lockfile, else config file, is at the root, so a project that names pnpm only
-  in `packageManager` now counts as pnpm too.
+  else the one whose lockfile, else config file (a `bunfig.toml` only with an `[install]` table), is
+  at the root, so a project that names pnpm only in `packageManager` now counts as pnpm too.
 - Checks Yarn's catalogs in `.yarnrc.yml` and Bun's in the root `package.json`.
-- Honors Yarn's `npmMinimalAgeGate` and Bun's `minimumReleaseAge` (with
+- Honors Yarn's `npmMinimalAgeGate` (with `npmPreapprovedPackages`, in the root `.yarnrc.yml` or
+  `~/.yarnrc.yml`, with or without `yarn.lock`) and Bun's `minimumReleaseAge` (with
   `minimumReleaseAgeExcludes`, in `bunfig.toml` or the global `.bunfig.toml`).
 - A dependency in more than one of `dependencies`, `devDependencies` and `optionalDependencies` is
   checked in each section, by its spec there. Before, only one section's spec was compared, so a

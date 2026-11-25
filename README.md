@@ -85,8 +85,8 @@ release your package manager won't install yet:
   global config. pnpm 11 and later wait a day when nothing sets it, and so does latest-or-bust,
   leaving out what `minimumReleaseAgeExclude` names. pnpm's version comes from `packageManager` in
   `package.json`, else `pnpm --version`.
-- Yarn: `npmMinimalAgeGate` in the `.yarnrc.yml` next to `yarn.lock`, or in your home directory
-  (Yarn 4.10 and later; Yarn 1 has none)
+- Yarn: `npmMinimalAgeGate` in the root `.yarnrc.yml`, or in your home directory, leaving out what
+  `npmPreapprovedPackages` names (Yarn 4.10 and later; Yarn 1 has none)
 - Bun: `minimumReleaseAge` and `minimumReleaseAgeExcludes` in `bunfig.toml`'s `[install]`, or in
   the global `.bunfig.toml` (in `$XDG_CONFIG_HOME`, else your home directory)
 
@@ -129,12 +129,13 @@ npm, pnpm, Yarn (1 and 2 and later) and Bun are supported. The package manager i
 `package.json`'s `packageManager` names, else the one whose lockfile is at the root
 (`pnpm-lock.yaml`, `yarn.lock`, `bun.lock` or `bun.lockb`, `package-lock.json` or
 `npm-shrinkwrap.json`), else the one whose config file is (`pnpm-workspace.yaml`, `.yarnrc.yml`,
-`bunfig.toml`), else npm.
+or a `bunfig.toml` with an `[install]` table: one without configures only Bun's runtime or test
+runner), else npm.
 
 Registry settings that only Yarn 2+ or Bun read (`.yarnrc.yml`'s top-level `npmRegistryServer` and
 `npmAuthToken`, `bunfig.toml`'s registries) aren't used: a dependency from such a registry fails as
 one it can't look up. Put the registry in `.npmrc` too (Bun reads it as well), or for Yarn, in
-`npmScopes`.
+`npmScopes` (which are only read with `yarn.lock` at the root).
 
 ## Requirements
 
