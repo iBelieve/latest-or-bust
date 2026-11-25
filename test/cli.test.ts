@@ -193,6 +193,22 @@ describe("latest-or-bust", () => {
     assert.match(run.stdout, /Nothing to check: latest-or-bust\.json exempts all of them\./);
   });
 
+  it("counts a dependency exempt in two catalogs once", async () => {
+    repo.write({ "package.json": {} });
+    repo.commit();
+    repo.write({
+      "latest-or-bust.json": { exempt: { foo: { reason: "foo 1.1 breaks us" } } },
+      "package.json": {
+        catalog: { foo: "1.0.0", bar: "1.0.0" },
+        catalogs: { legacy: { foo: "1.0.0" } },
+      },
+    });
+    const run = await cli(repo.root, ["HEAD"]);
+    assert.equal(run.code, 0, run.stderr);
+    assert.match(run.stdout, /package\.json catalogs: bar, foo\n/);
+    assert.match(run.stdout, /All of them are the newest release\./);
+  });
+
   it("doesn't say all are exempt when one is exempt in two sections and another isn't", async () => {
     repo.write({ "package.json": {} });
     repo.commit();

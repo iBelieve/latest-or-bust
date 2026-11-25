@@ -10,7 +10,8 @@ import { createRepository, startRegistry, type Registry, type Repository } from 
 
 let registry: Registry;
 let repo: Repository;
-// pnpm's global config dir is XDG_CONFIG_HOME/pnpm: a throwaway one, so the
+// pnpm's global config dir is XDG_CONFIG_HOME/pnpm, and Bun's global
+// bunfig.toml is XDG_CONFIG_HOME/.bunfig.toml: a throwaway one, so the
 // machine's doesn't change what the tests find.
 let configHome: string;
 const savedConfigHome = process.env["XDG_CONFIG_HOME"];
@@ -33,6 +34,11 @@ before(async () => {
     baz: [["3.0.0", 5]],
     // Its only release is younger than the cooldowns.
     fresh: [["1.0.0", 0.1]],
+    // Its newest is younger than the cooldowns.
+    hot: [
+      ["1.0.0", 30],
+      ["1.1.0", 0.1],
+    ],
   });
 });
 
@@ -47,7 +53,11 @@ beforeEach(() => {
   repo = createRepository();
 });
 
-afterEach(() => repo.remove());
+afterEach(() => {
+  repo.remove();
+  // Bun's global bunfig.toml, if a test wrote one.
+  rmSync(join(configHome, ".bunfig.toml"), { force: true });
+});
 
 /** An npm project: package-lock.json makes npm-check-updates read .npmrc's min-release-age. */
 function npmProject(manifest: object, files: Record<string, string | object> = {}): void {
@@ -70,7 +80,50 @@ function pnpmProject(workspace: string, files: Record<string, string | object> =
   });
 }
 
+/** A Yarn project, with .yarnrc.yml's 1-day npmMinimalAgeGate (in minutes). */
+function yarnProject(yarnrc: string, files: Record<string, string | object> = {}): void {
+  repo.write({
+    ".npmrc": `registry=${registry.url}\n`,
+    "yarn.lock": "__metadata:\n  version: 8\n",
+    ".yarnrc.yml": `npmMinimalAgeGate: 1440\n${yarnrc}`,
+    "package.json": { name: "root", packageManager: "yarn@4.12.0" },
+    ...files,
+  });
+}
+
+/** A Bun project, with bunfig.toml's 1-day minimumReleaseAge (in seconds). */
+function bunProject(manifest: object, install = ""): void {
+  repo.write({
+    ".npmrc": `registry=${registry.url}\n`,
+    "bun.lock": "{}\n",
+    "bunfig.toml": `[install]\nminimumReleaseAge = 86400\n${install}`,
+    "package.json": manifest,
+  });
+}
+
+/** A project without a lockfile: package.json is `manifest`, and `files` are written besides. */
+function bareProject(manifest: object, files: Record<string, string> = {}): void {
+  repo.write({ ".npmrc": `registry=${registry.url}\n`, ...files, "package.json": manifest });
+}
+
 const run = (base: string): Promise<CheckResult> => check({ root: repo.root, base });
+
+/**
+ * `run`, with a throwaway home directory: Yarn's user .yarnrc.yml is
+ * ~/.yarnrc.yml, and the machine's mustn't change what the tests find.
+ */
+async function runAtHome(base: string): Promise<CheckResult> {
+  const saved = { HOME: process.env["HOME"], USERPROFILE: process.env["USERPROFILE"] };
+  process.env["HOME"] = process.env["USERPROFILE"] = configHome;
+  try {
+    return await run(base);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
 
 /** The outdated dependencies, as "file name spec → latest". */
 const outdated = (result: CheckResult): string[] =>
@@ -313,6 +366,13 @@ describe("check", () => {
       }
     });
 
+    it("applies to a project that names pnpm only in packageManager", async () => {
+      bareProject({ packageManager: "pnpm@11.0.0", dependencies: {} });
+      const base = repo.commit();
+      bareProject({ packageManager: "pnpm@11.0.0", dependencies: { foo: "1.2.0" } });
+      assert.deepEqual(outdated(await run(base)), []);
+    });
+
     it("doesn't apply before pnpm 11", async () => {
       assert.deepEqual(await addFoo("10.28.0"), ["package.json foo 1.2.0 → 1.3.0"]);
     });
@@ -460,6 +520,102 @@ describe("check", () => {
     const base = repo.commit();
     repo.write({ "pnpm-workspace.yaml": "minimumReleaseAge: 1440\ncatalog:\n  foo: 1.1.0\n" });
     assert.deepEqual(outdated(await run(base)), ["pnpm-workspace.yaml foo 1.1.0 → 1.2.0"]);
+  });
+
+  it("checks Yarn's catalogs in .yarnrc.yml, with its npmMinimalAgeGate", async () => {
+    yarnProject("catalog:\n  foo: 1.0.0\n");
+    const base = repo.commit();
+    yarnProject("catalog:\n  foo: 1.1.0\ncatalogs:\n  legacy:\n    '@scope/bar': ^1.0.0\n", {
+      "package.json": { name: "root", dependencies: { foo: "1.2.0" } },
+    });
+    const result = await runAtHome(base);
+    assert.deepEqual(
+      result.checked,
+      new Map([
+        ["package.json", ["foo"]],
+        [".yarnrc.yml", ["@scope/bar", "foo"]],
+      ]),
+    );
+    // package.json's foo is the newest release the age gate allows.
+    assert.deepEqual(outdated(result), [
+      ".yarnrc.yml foo 1.1.0 → 1.2.0",
+      ".yarnrc.yml @scope/bar ^1.0.0 → ^2.0.0",
+    ]);
+    assert.equal(result.outdated[1]?.catalog, "legacy");
+  });
+
+  it("honors .yarnrc.yml's npmMinimalAgeGate and npmPreapprovedPackages without yarn.lock", async () => {
+    const yarnrc = { ".yarnrc.yml": "npmMinimalAgeGate: 1d\nnpmPreapprovedPackages: ['h*']\n" };
+    bareProject({ packageManager: "yarn@4.12.0", dependencies: {} }, yarnrc);
+    const base = repo.commit();
+    bareProject(
+      { packageManager: "yarn@4.12.0", dependencies: { foo: "1.2.0", hot: "1.0.0" } },
+      yarnrc,
+    );
+    // Not foo's 1.3.0, younger than the gate; hot's 1.1.0 is preapproved.
+    assert.deepEqual(outdated(await runAtHome(base)), ["package.json hot 1.0.0 → 1.1.0"]);
+  });
+
+  it("takes a bunfig.toml without [install] for Bun's runtime, not its package manager", async () => {
+    const files = {
+      ".npmrc": `registry=${registry.url}\nmin-release-age=1\n`,
+      "bunfig.toml": "[test]\npreload = ['./setup.ts']\n",
+    };
+    bareProject({ dependencies: {} }, files);
+    const base = repo.commit();
+    bareProject({ dependencies: { foo: "1.2.0" } }, files);
+    // An npm project, so .npmrc's min-release-age applies: 1.3.0 is younger.
+    assert.deepEqual(outdated(await run(base)), []);
+  });
+
+  it("honors Bun's minimumReleaseAge and its exclusions, from bunfig.toml", async () => {
+    bunProject({ dependencies: {} });
+    const base = repo.commit();
+    bunProject(
+      { dependencies: { foo: "1.2.0", hot: "1.0.0" } },
+      'minimumReleaseAgeExcludes = ["hot"]\n',
+    );
+    const result = await run(base);
+    assert.deepEqual(result.checked, new Map([["package.json", ["foo", "hot"]]]));
+    assert.deepEqual(outdated(result), ["package.json hot 1.0.0 → 1.1.0"]);
+  });
+
+  it("takes Bun's minimumReleaseAge from the global bunfig.toml, never from .npmrc", async () => {
+    bunProject({ dependencies: {} });
+    const base = repo.commit();
+    // Bun doesn't read .npmrc's min-release-age: without a cooldown, 1.3.0 is the newest.
+    repo.write({
+      ".npmrc": `registry=${registry.url}\nmin-release-age=1\n`,
+      "bunfig.toml": "[install]\n",
+      "package.json": { dependencies: { foo: "1.2.0" } },
+    });
+    assert.deepEqual(outdated(await run(base)), ["package.json foo 1.2.0 → 1.3.0"]);
+    writeFileSync(join(configHome, ".bunfig.toml"), "[install]\nminimumReleaseAge = 86400\n");
+    assert.deepEqual(outdated(await run(base)), []);
+    // A cooldown small enough that String() writes it with an exponent.
+    repo.write({ "bunfig.toml": "[install]\nminimumReleaseAge = 0.000001\n" });
+    assert.deepEqual(outdated(await run(base)), ["package.json foo 1.2.0 → 1.3.0"]);
+  });
+
+  it("checks Bun's catalogs in the root package.json", async () => {
+    bunProject({ workspaces: { packages: ["web"], catalog: { foo: "1.0.0" } } });
+    const base = repo.commit();
+    bunProject({
+      workspaces: { packages: ["web"], catalog: { foo: "1.1.0" } },
+      catalogs: { legacy: { "@scope/bar": "^2.0.0" } },
+    });
+    const result = await run(base);
+    assert.deepEqual(result.checked, new Map([["package.json catalogs", ["@scope/bar", "foo"]]]));
+    assert.deepEqual(result.outdated, [
+      { file: "package.json", catalog: "default", name: "foo", spec: "1.1.0", latest: "1.2.0" },
+    ]);
+  });
+
+  it("fails on a bunfig.toml it can't read, naming it", async () => {
+    bunProject({ dependencies: {} });
+    const base = repo.commit();
+    repo.write({ "bunfig.toml": "[install]\nminimumReleaseAge = '1d'\n" });
+    await assert.rejects(run(base), /Can't parse bunfig\.toml/);
   });
 
   it("ignores .ncurc, whatever it says", async () => {
