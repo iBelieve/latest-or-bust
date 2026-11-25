@@ -1,0 +1,48 @@
+name: Publish
+
+# Publishing a GitHub release tagged v<version> stages that version on npm,
+# with provenance, through npm trusted publishing (no token: the id-token
+# permission lets npm verify this workflow). A maintainer then approves the
+# staged version with 2FA on npmjs.com before it goes live. The same setup as
+# iBelieve/vestrycms.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  # npm trusted publishing and provenance.
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+          require-lockfile: true
+
+      - name: Check the tag matches package.json
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="v$(node -p 'require("./package.json").version')"
+          if [ "$TAG" != "$version" ]; then
+            echo "::error::Release tag $TAG doesn't match package.json's $version"
+            exit 1
+          fi
+
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm test
+
+      # Staged publishing needs npm 11.15 or later, which Node.js 26 ships.
+      # prepack builds dist/.
+      - name: Stage the release on npm
+        run: npm stage publish --provenance --access public

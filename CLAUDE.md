@@ -46,5 +46,10 @@ needs a line in its `needs`.
 
 ## Releasing
 
-Michael publishes to npm by hand: bump `version` in `package.json`, then
-`pnpm publish` (`prepack` builds `dist/`).
+Bump `version` in `package.json`, move `CHANGELOG.md`'s Unreleased entries
+under the new version, merge, then publish a GitHub release tagged
+`v<version>`. `.github/workflows/publish.yml` checks the tag matches, runs
+the checks and stages the version on npm with provenance through npm trusted
+publishing (`npm stage publish`); Michael approves it with 2FA on npmjs.com
+before it's live. Record user-visible changes under Unreleased in
+`CHANGELOG.md` as they land.

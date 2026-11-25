@@ -55,6 +55,12 @@ jobs:
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run build
 
+      # What npm would publish: dist/, the config files ncu and editors use,
+      # README, LICENSE.
+      - name: Check the package contents
+        if: (success() || failure()) && steps.build.outcome == 'success'
+        run: npm pack --dry-run
+
       # Pull requests only, against their base: on master the change has
       # already been checked. Not Dependabot's: its grouped minor-and-patch
       # PRs don't move a dependency to a new major version even when one is
