@@ -5,6 +5,10 @@ it's below 1.0, a minor version may change behaviour.
 
 ## Unreleased
 
+## 0.2.0
+
+Yarn and Bun support, and no setup needed on GitHub Actions.
+
 - Yarn and Bun projects. The package manager is the one `package.json`'s `packageManager` names,
   else the one whose lockfile, else config file (a `bunfig.toml` only with an `[install]` table), is
   at the root, so a project that names pnpm only in `packageManager` now counts as pnpm too.
