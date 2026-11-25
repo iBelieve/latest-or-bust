@@ -26,6 +26,8 @@ it's below 1.0, a minor version may change behaviour.
   run, along with pull requests from Dependabot and Renovate, passes with a note that there's nothing
   to check. A base revision passed on the command line still wins. A workflow no longer needs
   `fetch-depth: 2`, `HEAD^` or an `if:` on the event.
+- The README credits npm-check-updates, which latest-or-bust is built on, near the top and in a new
+  Acknowledgments section.
 
 ## 0.1.0
 
