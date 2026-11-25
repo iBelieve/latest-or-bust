@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "rules": {
+    "unused-dev-dependencies": "error",
+    "unused-optional-dependencies": "error",
+    "coverage-gaps": "error",
+    "require-suppression-reason": "error"
+  }
+}

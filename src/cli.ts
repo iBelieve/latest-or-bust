@@ -44,40 +44,30 @@ function version(): string {
 const where = ({ file, catalog }: Place): string =>
   catalog === undefined ? file : `${file} (catalog ${catalog})`;
 
-function report(result: CheckResult): boolean {
-  if (result.checked.size === 0) {
-    console.log("No dependencies were added or changed.");
-    return true;
-  }
+/** Lists what was checked, and the exemptions that applied. */
+function reportChecked(result: CheckResult): void {
   for (const [file, names] of result.checked) {
     console.log(`${file}: ${names.join(", ")}`);
   }
-  if (result.exempted.length > 0) {
-    console.log(`\nExempt in ${CONFIG_FILE}:`);
-    for (const exempted of result.exempted) {
-      const how = exempted.allow === "minor" ? "newest on its major" : "not checked";
-      console.log(`  ${where(exempted)}  ${exempted.name}  (${how}: ${exempted.reason})`);
-    }
+  if (result.exempted.length === 0) return;
+  console.log(`\nExempt in ${CONFIG_FILE}:`);
+  for (const exempted of result.exempted) {
+    const how = exempted.allow === "minor" ? "newest on its major" : "not checked";
+    console.log(`  ${where(exempted)}  ${exempted.name}  (${how}: ${exempted.reason})`);
   }
-  if (result.notFound.length > 0) {
-    console.error(
-      "\nNo release found (not on the registry, or the registry unreachable or refusing the login):",
-    );
-    for (const notFound of result.notFound) {
-      console.error(`  ${where(notFound)}  ${notFound.name}  ${notFound.spec}`);
-    }
+}
+
+function reportNotFound(result: CheckResult): void {
+  if (result.notFound.length === 0) return;
+  console.error(
+    "\nNo release found (not on the registry, or the registry unreachable or refusing the login):",
+  );
+  for (const notFound of result.notFound) {
+    console.error(`  ${where(notFound)}  ${notFound.name}  ${notFound.spec}`);
   }
-  if (result.outdated.length === 0) {
-    if (result.notFound.length > 0) return false;
-    const unchecked = result.exempted.filter((exempted) => exempted.allow === undefined).length;
-    const total = [...result.checked.values()].reduce((sum, names) => sum + names.length, 0);
-    console.log(
-      unchecked >= total
-        ? `\nNothing to check: ${CONFIG_FILE} exempts all of them.`
-        : "\nAll of them are the newest release.",
-    );
-    return true;
-  }
+}
+
+function reportOutdated(result: CheckResult): void {
   console.error("\nNot the newest release:");
   for (const outdated of result.outdated) {
     // Already exempt with "allow": "minor", so it's behind on its own major.
@@ -90,7 +80,29 @@ function report(result: CheckResult): boolean {
   console.error(
     `\nUpdate them, or if one is held back on purpose, exempt it in ${CONFIG_FILE} with the reason why.`,
   );
-  return false;
+}
+
+/** Prints the result; true if the check passed. */
+function report(result: CheckResult): boolean {
+  if (result.checked.size === 0) {
+    console.log("No dependencies were added or changed.");
+    return true;
+  }
+  reportChecked(result);
+  reportNotFound(result);
+  if (result.outdated.length > 0) {
+    reportOutdated(result);
+    return false;
+  }
+  if (result.notFound.length > 0) return false;
+  const unchecked = result.exempted.filter((exempted) => exempted.allow === undefined).length;
+  const total = [...result.checked.values()].reduce((sum, names) => sum + names.length, 0);
+  console.log(
+    unchecked >= total
+      ? `\nNothing to check: ${CONFIG_FILE} exempts all of them.`
+      : "\nAll of them are the newest release.",
+  );
+  return true;
 }
 
 /** An error's message, followed by its causes'. */

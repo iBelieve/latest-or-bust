@@ -35,7 +35,12 @@
     "prepack": "pnpm run build",
     "typecheck": "tsc -p .",
     "lint": "oxlint",
+    "fallow": "fallow dead-code && fallow dupes --fail-on-issues",
     "test": "node --test 'test/*.test.ts'",
+    "test:coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node --test 'test/*.test.ts'",
+    "health": "fallow health --complexity --coverage-gaps --coverage coverage",
+    "mutation": "fallow mutation",
+    "smoke": "bash scripts/smoke-test.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -46,6 +51,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "fallow": "3.48.0",
+    "fast-check": "4.11.0",
     "oxlint": "1.95.0",
     "prettier": "3.10.1",
     "tsrs": "7.1.0-beta.tsrs5",
