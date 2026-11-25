@@ -16,11 +16,13 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
   change what it does. `src/packageManager.ts`: which package manager a
   project uses, and Bun's cooldown from `bunfig.toml` (npm-check-updates
   reads npm's, pnpm's and Yarn's itself, not Bun's, and Yarn's only next to
-  a lockfile, so Yarn's without `yarn.lock` is read here too). `src/pnpm.ts`: pnpm
-  11+'s default `minimumReleaseAge`, which npm-check-updates only applies
-  when it's set, given to it as a copy of pnpm's global config.
-  `src/check.ts` ties them together, asking about each package.json section
-  on its own; `src/cli.ts` is the command
+  a lockfile, so Yarn's without `yarn.lock` is read here too).
+  `src/pnpm.ts`: pnpm 11+'s default `minimumReleaseAge`, which
+  npm-check-updates only applies when it's set, given to it as a copy of
+  pnpm's global config. `src/check.ts` ties them together, asking about each
+  package.json section on its own; `src/cli.ts` is the command
+- `src/github.ts`: on GitHub Actions, the base when none is passed (a pull
+  request's), or that the run has nothing to check
 - latest-or-bust's own config is the interface; npm-check-updates is an
   implementation detail that could be swapped out, so don't expose its
   options
@@ -47,8 +49,9 @@ needs a line in its `needs`.
 - `pnpm test` (node:test; CI runs it on Node.js 22, 24 and 26, the lines
   `engines` allows). The tests use throwaway git repositories and a fake
   registry, never the real one
-- On pull requests, `node dist/cli.js HEAD^`: latest-or-bust checks its own
-  dependencies, so add a dependency at its newest release
+- `node dist/cli.js`: latest-or-bust checks its own dependencies (against a
+  pull request's base; other runs pass), so add a dependency at its newest
+  release
 - actionlint over the workflows
 - `minimumReleaseAge` in `pnpm-workspace.yaml` rejects releases under a day
   old, so don't pin a version published today

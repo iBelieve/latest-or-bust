@@ -23,16 +23,12 @@ env:
 
 jobs:
   # Formatting, type checks, lint and the build, on the Node.js from
-  # .node-version; then latest-or-bust checks its own pull requests.
+  # .node-version; then latest-or-bust checks its own dependencies.
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-        with:
-          # The dependency check compares a pull request's merge commit with
-          # HEAD^, its base.
-          fetch-depth: 2
 
       # Installs the pnpm from package.json's packageManager, Node.js from
       # .node-version, and runs pnpm install --frozen-lockfile.
@@ -73,16 +69,12 @@ jobs:
             fi
           done
 
-      # Pull requests only, against their base: on master the change has
-      # already been checked. Not Dependabot's: its grouped minor-and-patch
-      # PRs don't move a dependency to a new major version even when one is
-      # out, so they'd fail this.
+      # It works out what to check on its own: a pull request against its
+      # base (fetching that into the shallow clone), and on master or from
+      # Dependabot, nothing.
       - name: Check that new dependencies are the newest release
-        if: >-
-          (success() || failure()) && steps.build.outcome == 'success' &&
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.user.login != 'dependabot[bot]'
-        run: node dist/cli.js HEAD^
+        if: (success() || failure()) && steps.build.outcome == 'success'
+        run: node dist/cli.js
 
   # The tests, on every Node.js release line package.json's engines allows.
   test:
