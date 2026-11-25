@@ -168,9 +168,9 @@ and `pnpm run format:check`. CI runs all of them; `CLAUDE.md` says what each one
 
 latest-or-bust depends on [npm-check-updates](https://github.com/raineorshine/npm-check-updates),
 created by Tomas Junnonen and maintained by [Raine Revere](https://github.com/raineorshine) and its
-contributors, under the Apache License 2.0. It looks up each newest release, with your registry
-settings and release-age cooldown. If latest-or-bust is useful to you, so is npm-check-updates on
-its own: `ncu -u` upgrades all of a project's dependencies at once.
+contributors, under the Apache License 2.0. If latest-or-bust is useful to you, so is
+npm-check-updates on its own: `ncu -u` upgrades all of a `package.json`'s dependencies at once, and
+`ncu -u --workspaces` every workspace package's too.
 
 ## License
 
