@@ -114,11 +114,13 @@ export function matchWorkspaces(patterns: string[], candidates: string[]): strin
     .toSorted();
 }
 
-// Specs that don't name a registry version, such as "catalog:",
-// "workspace:*", "link:../x", "file:x.tgz", "npm:other@1" or a git URL. A
-// catalog's own entries are checked where they're defined.
+// A version, range or dist-tag, as opposed to a spec that doesn't name a
+// registry version: a protocol ("catalog:", "workspace:*", "link:../x",
+// "npm:other@1", a git or tarball URL), a GitHub "owner/repo", an scp-style
+// git remote ("git@host:repo"), a path or a tarball. None of those can be
+// looked up, and a catalog's own entries are checked where they're defined.
 function isRegistrySpec(spec: string): boolean {
-  return !/^[a-z][a-z+]*:/i.test(spec);
+  return !/[:/\\]/.test(spec) && !/\.(tgz|tar|tar\.gz)$/i.test(spec);
 }
 
 /**
@@ -131,9 +133,9 @@ export function changedEntries(base: Specs, head: Specs): Map<string, Specs> {
   const changed = new Map<string, Specs>();
   for (const [key, spec] of head) {
     if (base.get(key) === spec || !isRegistrySpec(spec)) continue;
-    // A scoped name's "@" comes first, so a catalog prefix is whatever
-    // precedes the first ":".
-    const colon = key.indexOf(":");
+    // A package name can't hold a ":", but a catalog's name can
+    // ("catalog:react:17"), so the prefix is whatever precedes the last one.
+    const colon = key.lastIndexOf(":");
     const catalog = colon === -1 ? "" : key.slice(0, colon);
     const entries = changed.get(catalog) ?? new Map<string, string>();
     entries.set(key.slice(colon + 1), spec);

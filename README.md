@@ -51,6 +51,8 @@ jobs:
         with:
           fetch-depth: 2
       - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - run: npm ci
       - run: npx latest-or-bust HEAD^
 ```
@@ -76,6 +78,9 @@ cooldown, so it never asks for a release your package manager won't install yet:
 - npm: `min-release-age` in `.npmrc`
 - pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` (a project with `pnpm-workspace.yaml` or
   `pnpm-lock.yaml` is a pnpm project)
+
+A dependency it can't look up, because it isn't on the registry or the registry is unreachable or
+refuses the login, fails the check too: there's no telling whether it's the newest.
 
 latest-or-bust doesn't read npm-check-updates' own config files (`.ncurc` and the like), so the
 options there can't change what it checks.

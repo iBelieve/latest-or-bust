@@ -144,6 +144,17 @@ describe("changedNames", () => {
     assert.deepEqual(changedNames(base, head), ["added", "react"]);
   });
 
+  it("counts versions, ranges and dist-tags as registry specs", () => {
+    const head = specMap({
+      a: "1.0.0",
+      b: ">=1.2.0 <2",
+      c: "1.x || ^3.0.0-beta.1",
+      d: "next",
+      e: "*",
+    });
+    assert.deepEqual(changedNames(new Map(), head), ["a", "b", "c", "d", "e"]);
+  });
+
   it("counts any change to a spec, including a range's floor or a downgrade", () => {
     const base = specMap({ a: "1.0.0", b: "^1.0.0", c: "2.0.0" });
     const head = specMap({ a: "~1.0.0", b: "^1.1.0", c: "1.0.0" });
@@ -159,6 +170,12 @@ describe("changedNames", () => {
       e: "npm:other@1",
       f: "git+https://example.com/f.git",
       g: "github:owner/g",
+      h: "owner/h",
+      i: "owner/i#v1.0.0",
+      j: "git@github.com:owner/j.git",
+      k: "../k",
+      l: "l-1.0.0.tgz",
+      m: "C:\\packages\\m",
     });
     assert.deepEqual(changedNames(new Map(), head), []);
   });
@@ -185,6 +202,14 @@ describe("changedEntries", () => {
         ["legacy", specMap({ "@types/node": "^22.0.0" })],
         ["next", specMap({ react: "^19.3.2" })],
       ]),
+    );
+  });
+
+  it("takes a catalog name with a colon in it whole", () => {
+    const head = specMap({ "react:17:@types/react": "^17.0.0" });
+    assert.deepEqual(
+      changedEntries(new Map(), head),
+      new Map([["react:17", specMap({ "@types/react": "^17.0.0" })]]),
     );
   });
 });

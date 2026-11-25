@@ -67,7 +67,8 @@ export function inWorkingTree(root: string, path: string): string | undefined {
 
 /**
  * The directories, other than the root, holding a package.json that git
- * tracks or would track (untracked but not ignored), with forward slashes.
+ * tracks or would track (untracked but not ignored), with forward slashes,
+ * leaving out node_modules.
  */
 export function packageDirectories(root: string): string[] {
   const files = git(root, [
@@ -78,12 +79,13 @@ export function packageDirectories(root: string): string[] {
     "--exclude-standard",
     "--",
     "*/package.json",
+    // Left out by git, not after: in a repository that doesn't ignore
+    // node_modules, their package.json files could overflow the output buffer.
+    ":(exclude,glob)**/node_modules/**",
   ]);
   const dirs = new Set<string>();
   for (const file of files.split("\0")) {
-    if (posix.basename(file) !== "package.json") continue;
-    const dir = posix.dirname(file);
-    if (!dir.split("/").includes("node_modules")) dirs.add(dir);
+    if (posix.basename(file) === "package.json") dirs.add(posix.dirname(file));
   }
   return [...dirs];
 }

@@ -24,6 +24,8 @@ before(async () => {
       ["2.0.0", 5],
     ],
     baz: [["3.0.0", 5]],
+    // Its only release is younger than the cooldowns.
+    fresh: [["1.0.0", 0.1]],
   });
 });
 
@@ -104,6 +106,35 @@ describe("check", () => {
     assert.deepEqual(result.outdated, []);
   });
 
+  // The newest of foo, 1.3.0, and of fresh, 1.0.0, are in the cooldown.
+  it("fails on a dependency it finds no release of, and passes the rest", async () => {
+    npmProject({ dependencies: {} });
+    const base = repo.commit();
+    npmProject({
+      dependencies: { foo: "1.2.0", "not-on-the-registry": "^1.0.0" },
+      devDependencies: { fresh: "1.0.0" },
+    });
+    const result = await run(base);
+    assert.deepEqual(result.outdated, []);
+    assert.deepEqual(result.notFound, [
+      { file: "package.json", name: "not-on-the-registry", spec: "^1.0.0" },
+    ]);
+  });
+
+  it("fails on a dependency it finds no release of in a catalog, or on its major", async () => {
+    pnpmProject("");
+    const base = repo.commit();
+    pnpmProject("catalogs:\n  next:\n    fresh: 1.0.0\n    missing: ^1.0.0\n", {
+      "latest-or-bust.json": { exempt: { gone: { reason: "testing", allow: "minor" } } },
+      "package.json": { name: "root", dependencies: { gone: "^2.0.0" } },
+    });
+    const result = await run(base);
+    assert.deepEqual(result.notFound, [
+      { file: "package.json", name: "gone", spec: "^2.0.0" },
+      { file: "pnpm-workspace.yaml", catalog: "next", name: "missing", spec: "^1.0.0" },
+    ]);
+  });
+
   it("leaves alone outdated dependencies the change didn't touch", async () => {
     npmProject({ dependencies: { foo: "1.0.0", "@scope/bar": "1.0.0" } });
     const base = repo.commit();
@@ -155,6 +186,7 @@ describe("check", () => {
     const result = await run(base);
     // @scope/bar's 2.0.0 is out, but 1.0.0 is the newest 1.x; foo's 1.2.0 is the newest 1.x.
     assert.deepEqual(outdated(result), ["package.json foo 1.1.0 → 1.2.0"]);
+    assert.equal(result.outdated[0]?.allow, "minor");
     assert.deepEqual(
       result.exempted.map(({ name, allow }) => `${name} ${String(allow)}`),
       ["@scope/bar minor", "foo minor"],
@@ -181,15 +213,17 @@ describe("check", () => {
 
   it("checks npm workspace packages, new ones too, and nothing outside them", async () => {
     npmProject(
-      { workspaces: ["packages/*"] },
+      { workspaces: ["packages/**"] },
       { "packages/a/package.json": { dependencies: { foo: "1.0.0" } } },
     );
     const base = repo.commit();
     npmProject(
-      { workspaces: ["packages/*"] },
+      { workspaces: ["packages/**"] },
       {
         "packages/a/package.json": { dependencies: { foo: "1.1.0" } },
         "packages/new/package.json": { devDependencies: { "@scope/bar": "1.0.0" } },
+        // Matches the pattern and isn't ignored, but is never a workspace package.
+        "packages/a/node_modules/x/package.json": { dependencies: { foo: "1.0.0" } },
         "test/fixture/package.json": { dependencies: { foo: "1.0.0" } },
       },
     );
@@ -229,6 +263,17 @@ describe("check", () => {
     const result = await run(base);
     assert.deepEqual(result.checked, new Map([["pnpm-workspace.yaml", ["@scope/bar", "foo"]]]));
     assert.deepEqual(outdated(result), ["pnpm-workspace.yaml @scope/bar ^1.0.0 → ^2.0.0"]);
+    assert.equal(result.outdated[0]?.catalog, "legacy");
+  });
+
+  it("checks a named catalog with a colon in its name", async () => {
+    pnpmProject("catalogs:\n  'react:17':\n    foo: 1.0.0\n");
+    const base = repo.commit();
+    pnpmProject("catalogs:\n  'react:17':\n    foo: 1.1.0\n");
+    const result = await run(base);
+    assert.deepEqual(result.checked, new Map([["pnpm-workspace.yaml", ["foo"]]]));
+    assert.deepEqual(outdated(result), ["pnpm-workspace.yaml foo 1.1.0 → 1.2.0"]);
+    assert.equal(result.outdated[0]?.catalog, "react:17");
   });
 
   it("judges each catalog's entry by its own spec", async () => {

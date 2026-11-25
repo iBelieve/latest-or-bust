@@ -10,6 +10,9 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   # Cancel superseded runs on PR branches only; let every master commit finish.
@@ -56,10 +59,19 @@ jobs:
         run: pnpm run build
 
       # What npm would publish: dist/, the config files ncu and editors use,
-      # README, LICENSE.
+      # README, LICENSE. Each must be there: the command fails at run time
+      # without ncurc.mjs, and npm pack doesn't mind a missing one.
       - name: Check the package contents
         if: (success() || failure()) && steps.build.outcome == 'success'
-        run: npm pack --dry-run
+        run: |
+          files="$(npm pack --dry-run --json | jq -r '.[0].files[].path')"
+          echo "$files"
+          for file in dist/cli.js ncurc.mjs schema.json README.md LICENSE; do
+            if ! grep -qxF "$file" <<<"$files"; then
+              echo "::error::npm pack leaves out $file"
+              exit 1
+            fi
+          done
 
       # Pull requests only, against their base: on master the change has
       # already been checked. Not Dependabot's: its grouped minor-and-patch

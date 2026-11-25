@@ -10,8 +10,9 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
   `src/config.ts`: `latest-or-bust.json`, the exemptions (each needs a
   reason); `schema.json` describes it for editors. `src/ncu.ts`: runs
   npm-check-updates' own command line (so it reads `.npmrc` and the
-  package manager's cooldown just as `ncu` does), with an empty config file
-  (`ncurc.empty.json`) and options pinned, so a project's `.ncurc` can't
+  package manager's cooldown just as `ncu` does), with a config file of its
+  own (`ncurc.mjs`, which reports the packages it could look up, so a failed
+  lookup fails the check) and options pinned, so a project's `.ncurc` can't
   change what it does. `src/check.ts` ties them together; `src/cli.ts` is
   the command
 - latest-or-bust's own config is the interface; npm-check-updates is an

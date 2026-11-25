@@ -17,24 +17,39 @@ import {
 } from "./manifests.ts";
 import { newerReleases, type NcuOptions, type NcuQuery, type Upgrades } from "./ncu.ts";
 
+const byName = (a: { name: string }, b: { name: string }): number => (a.name < b.name ? -1 : 1);
+
 const PNPM_WORKSPACE = "pnpm-workspace.yaml";
 
-export interface Outdated {
+/** Where a dependency is: a file, and for a named pnpm catalog, the catalog. */
+export interface Place {
   /** The file it's in, relative to the root. */
   file: string;
+  /** The named catalog in pnpm-workspace.yaml it's in; undefined elsewhere. */
+  catalog?: string;
+}
+
+export interface Outdated extends Place {
   name: string;
   /** Its version spec there. */
   spec: string;
   /** The spec npm-check-updates would upgrade it to. */
   latest: string;
+  /** "minor" if latest-or-bust.json lets it stay on its major, so `latest` is the newest there. */
+  allow?: "minor";
 }
 
-export interface Exempted {
-  file: string;
+export interface Exempted extends Place {
   name: string;
   reason: string;
   /** "minor" if it was checked against the newest release on its major; undefined if it wasn't checked. */
   allow?: "minor";
+}
+
+export interface NotFound extends Place {
+  name: string;
+  /** Its version spec there. */
+  spec: string;
 }
 
 export interface CheckResult {
@@ -43,6 +58,12 @@ export interface CheckResult {
   /** The added or changed dependencies latest-or-bust.json exempts. */
   exempted: Exempted[];
   outdated: Outdated[];
+  /**
+   * The added or changed dependencies npm-check-updates found no release of:
+   * not on the registry, or the registry unreachable or refusing the login.
+   * They fail the check, since there's no telling if they're the newest.
+   */
+  notFound: NotFound[];
 }
 
 export interface CheckOptions {
@@ -61,25 +82,31 @@ function parsing<T>(where: string, parse: () => T): T {
   }
 }
 
-function outdatedIn(file: string, current: Specs, upgrades: Upgrades): Outdated[] {
+function outdatedIn(
+  place: Place,
+  current: Specs,
+  upgrades: Upgrades,
+  target: NcuQuery["target"],
+): Outdated[] {
   return [...upgrades].map(([name, latest]) => ({
-    file,
+    ...place,
     name,
     spec: current.get(name) ?? "",
     latest,
+    ...(target === "minor" ? { allow: target } : {}),
   }));
 }
 
 /**
- * Asks about one file's changed dependencies, minus the exempt ones: those
- * allowed to stay on their major are asked about with target "minor", and
- * the rest aren't asked about at all.
+ * Asks about one file's (or catalog's) changed dependencies, minus the
+ * exempt ones: those allowed to stay on their major are asked about with
+ * target "minor", and the rest aren't asked about at all.
  */
 async function checkFile(
   ncu: NcuOptions,
   config: Config,
   result: CheckResult,
-  file: string,
+  place: Place,
   query: Omit<NcuQuery, "names" | "target">,
   changed: Specs,
 ): Promise<void> {
@@ -91,23 +118,28 @@ async function checkFile(
       latest.push(name);
       continue;
     }
-    result.exempted.push({ file, name, ...exemption });
+    result.exempted.push({ ...place, name, ...exemption });
     if (exemption.allow === "minor") minor.push(name);
   }
   const outdated: Outdated[] = [];
+  const notFound: NotFound[] = [];
   for (const [names, target] of [
     [latest, "latest"],
     [minor, "minor"],
   ] as const) {
     const found = await newerReleases(ncu, { ...query, names: [...names], target });
-    outdated.push(...outdatedIn(file, changed, found));
+    outdated.push(...outdatedIn(place, changed, found.upgrades, target));
+    for (const name of found.notFound) {
+      notFound.push({ ...place, name, spec: changed.get(name) ?? "" });
+    }
   }
-  result.outdated.push(...outdated.toSorted((a, b) => (a.name < b.name ? -1 : 1)));
+  result.outdated.push(...outdated.toSorted(byName));
+  result.notFound.push(...notFound.toSorted(byName));
 }
 
 export async function check(options: CheckOptions): Promise<CheckResult> {
   const { root, base } = options;
-  const result: CheckResult = { checked: new Map(), exempted: [], outdated: [] };
+  const result: CheckResult = { checked: new Map(), exempted: [], outdated: [], notFound: [] };
   const before = (path: string) => atRevision(root, base, path);
   const now = (path: string) => inWorkingTree(root, path);
   const config = parseConfig(now(CONFIG_FILE));
@@ -144,7 +176,7 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
     const changed = changedEntries(previous, current).get("");
     if (changed === undefined) continue;
     result.checked.set(manifest, [...changed.keys()].toSorted());
-    await checkFile(ncu, config, result, manifest, { packageFile: manifest }, changed);
+    await checkFile(ncu, config, result, { file: manifest }, { packageFile: manifest }, changed);
   }
 
   const catalog = parsing(PNPM_WORKSPACE, () => catalogSpecs(workspace));
@@ -155,8 +187,10 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
   if (catalogNames.length > 0) {
     result.checked.set(PNPM_WORKSPACE, catalogNames);
     // Each catalog on its own, so each entry is judged by its own spec.
-    for (const entries of changedEntries(previousCatalog, catalog).values()) {
-      await checkFile(ncu, config, result, PNPM_WORKSPACE, { dependencies: entries }, entries);
+    for (const [named, entries] of changedEntries(previousCatalog, catalog)) {
+      // The default catalog's name is "".
+      const place: Place = { file: PNPM_WORKSPACE, ...(named === "" ? {} : { catalog: named }) };
+      await checkFile(ncu, config, result, place, { dependencies: entries }, entries);
     }
   }
   return result;

@@ -16,7 +16,9 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true,
     "noEmit": true
   },
-  "include": ["src/*.ts", "test/*.ts"]
+  "include": ["src/*.ts", "test/*.ts", "ncurc.mjs"]
 }

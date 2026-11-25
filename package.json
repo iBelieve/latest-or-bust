@@ -24,7 +24,7 @@
   },
   "files": [
     "dist",
-    "ncurc.empty.json",
+    "ncurc.mjs",
     "schema.json"
   ],
   "engines": {

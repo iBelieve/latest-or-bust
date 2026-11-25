@@ -3,7 +3,7 @@
 // the base isn't the newest release. See README.md.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { check, type CheckResult } from "./check.ts";
+import { check, type CheckResult, type Place } from "./check.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { defaultBase, repositoryRoot, resolveCommit } from "./git.ts";
 import { isRecord } from "./manifests.ts";
@@ -40,6 +40,10 @@ function version(): string {
     : "unknown";
 }
 
+/** A file, with the named catalog when there is one. */
+const where = ({ file, catalog }: Place): string =>
+  catalog === undefined ? file : `${file} (catalog ${catalog})`;
+
 function report(result: CheckResult): boolean {
   if (result.checked.size === 0) {
     console.log("No dependencies were added or changed.");
@@ -50,18 +54,38 @@ function report(result: CheckResult): boolean {
   }
   if (result.exempted.length > 0) {
     console.log(`\nExempt in ${CONFIG_FILE}:`);
-    for (const { file, name, reason, allow } of result.exempted) {
-      const how = allow === "minor" ? "newest on its major" : "not checked";
-      console.log(`  ${file}  ${name}  (${how}: ${reason})`);
+    for (const exempted of result.exempted) {
+      const how = exempted.allow === "minor" ? "newest on its major" : "not checked";
+      console.log(`  ${where(exempted)}  ${exempted.name}  (${how}: ${exempted.reason})`);
+    }
+  }
+  if (result.notFound.length > 0) {
+    console.error(
+      "\nNo release found (not on the registry, or the registry unreachable or refusing the login):",
+    );
+    for (const notFound of result.notFound) {
+      console.error(`  ${where(notFound)}  ${notFound.name}  ${notFound.spec}`);
     }
   }
   if (result.outdated.length === 0) {
-    console.log("\nAll of them are the newest release.");
+    if (result.notFound.length > 0) return false;
+    const unchecked = result.exempted.filter((exempted) => exempted.allow === undefined).length;
+    const total = [...result.checked.values()].reduce((sum, names) => sum + names.length, 0);
+    console.log(
+      unchecked >= total
+        ? `\nNothing to check: ${CONFIG_FILE} exempts all of them.`
+        : "\nAll of them are the newest release.",
+    );
     return true;
   }
   console.error("\nNot the newest release:");
-  for (const { file, name, spec, latest } of result.outdated) {
-    console.error(`  ${file}  ${name}  ${spec} → ${latest}`);
+  for (const outdated of result.outdated) {
+    // Already exempt with "allow": "minor", so it's behind on its own major.
+    const on =
+      outdated.allow === "minor" ? ` (the newest on its major, as ${CONFIG_FILE} allows)` : "";
+    console.error(
+      `  ${where(outdated)}  ${outdated.name}  ${outdated.spec} → ${outdated.latest}${on}`,
+    );
   }
   console.error(
     `\nUpdate them, or if one is held back on purpose, exempt it in ${CONFIG_FILE} with the reason why.`,

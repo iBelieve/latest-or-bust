@@ -136,6 +136,19 @@ describe("latest-or-bust", () => {
     assert.match(run.stderr, /exempt it in latest-or-bust\.json with the reason why/);
   });
 
+  it("fails, listing each dependency it finds no release of", async () => {
+    repo.write({ "package.json": { dependencies: {} } });
+    repo.commit();
+    repo.write({ "package.json": { dependencies: { foo: "1.1.0", nope: "^1.0.0" } } });
+    const run = await cli(repo.root, "HEAD");
+    assert.equal(run.code, 1);
+    assert.match(
+      run.stderr,
+      /No release found \(not on the registry.*\):\n {2}package\.json {2}nope {2}\^1\.0\.0\n/,
+    );
+    assert.doesNotMatch(run.stderr, /Not the newest release/);
+  });
+
   it("lists exemptions, and says it doesn't read .ncurc", async () => {
     repo.write({ "package.json": {} });
     repo.commit();
@@ -154,5 +167,6 @@ describe("latest-or-bust", () => {
       run.stdout,
       /Exempt in latest-or-bust\.json:\n {2}package\.json {2}foo {2}\(not checked: foo 1\.1 breaks us\)\n/,
     );
+    assert.match(run.stdout, /Nothing to check: latest-or-bust\.json exempts all of them\./);
   });
 });

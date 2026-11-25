@@ -21,11 +21,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # No saved git credentials, and no dependency cache: a cache that another
+      # workflow saved could plant code in a job that can publish.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: pnpm/setup@v3
         with:
-          cache: true
+          cache: false
           require-lockfile: true
 
       - name: Check the tag matches package.json
