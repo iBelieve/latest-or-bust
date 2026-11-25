@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iBelieve/latest-or-bust/blob/master/schema.json",
+  "title": "latest-or-bust.json",
+  "description": "latest-or-bust's config: the dependencies held back on purpose.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "exempt": {
+      "description": "Package name to why it's held back.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason"],
+        "properties": {
+          "reason": {
+            "description": "Why it's held back.",
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "allow": {
+            "description": "\"minor\": it may stay on its current major, but must be the newest release there. Left out: it isn't checked at all.",
+            "enum": ["minor"]
+          }
+        }
+      }
+    }
+  }
+}

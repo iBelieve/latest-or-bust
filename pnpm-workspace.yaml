@@ -1,0 +1,5 @@
+# pnpm 12 refuses to install a dependency release younger than this many
+# minutes (1 day, also pnpm's default), matching Dependabot's 1-day cooldown.
+# latest-or-bust reads it too (through npm-check-updates), so it doesn't ask
+# for a release pnpm won't install yet.
+minimumReleaseAge: 1440

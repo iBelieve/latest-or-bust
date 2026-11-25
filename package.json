@@ -1,0 +1,54 @@
+{
+  "name": "latest-or-bust",
+  "version": "0.1.0",
+  "description": "Fail CI when a change adds or changes an npm dependency that isn't on its latest version",
+  "keywords": [
+    "ci",
+    "dependencies",
+    "latest",
+    "npm-check-updates",
+    "outdated",
+    "pnpm"
+  ],
+  "license": "MIT",
+  "author": "Michael Spencer",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iBelieve/latest-or-bust.git"
+  },
+  "bugs": "https://github.com/iBelieve/latest-or-bust/issues",
+  "homepage": "https://github.com/iBelieve/latest-or-bust#readme",
+  "type": "module",
+  "bin": {
+    "latest-or-bust": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "ncurc.mjs",
+    "schema.json"
+  ],
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
+    "typecheck": "tsc -p .",
+    "lint": "oxlint",
+    "test": "node --test 'test/*.test.ts'",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "packageManager": "pnpm@12.21.0",
+  "dependencies": {
+    "npm-check-updates": "^23.1.1",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "oxlint": "1.95.0",
+    "prettier": "3.10.1",
+    "tsrs": "7.1.0-beta.tsrs5",
+    "typescript": "7.0.2"
+  }
+}
