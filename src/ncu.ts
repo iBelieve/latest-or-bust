@@ -1,12 +1,15 @@
 // Asks npm-check-updates for the newest release of some dependencies. It's
-// run as its own command line, not through its module API, so it reads its
-// config file (.ncurc and friends, for `reject`) and the package manager's
-// release-age cooldown (pnpm's minimumReleaseAge) just as `ncu` does.
+// run as its own command line, not through its module API, so it reads the
+// registry settings (.npmrc) and the package manager's release-age cooldown
+// (npm's min-release-age, pnpm's minimumReleaseAge) just as `ncu` does. It's
+// given an empty config file of its own, so a project's .ncurc can't change
+// what it does: latest-or-bust.json (config.ts) is latest-or-bust's config.
 
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isRecord, type Specs } from "./manifests.ts";
 
 /** Dependency name to the version spec npm-check-updates would upgrade it to. */
@@ -21,21 +24,38 @@ function ncuCli(): string {
 }
 
 export interface NcuOptions {
-  /** The repository root: npm-check-updates runs there and reads its config file from there. */
+  /** The repository root, where npm-check-updates runs. */
   root: string;
+  /** "pnpm" to say it's a pnpm project; otherwise npm-check-updates works it out. */
+  packageManager?: "pnpm";
 }
 
+/** What to ask about: dependencies of a package.json, or of a package's data. */
+export interface NcuQuery {
+  /** A package.json, relative to the root. */
+  packageFile?: string;
+  /** Dependency name to spec, checked as a package's dependencies. */
+  dependencies?: Specs;
+  names: string[];
+  /** "minor" for the newest release on each one's current major. */
+  target: "latest" | "minor";
+}
+
+// An empty config file, given explicitly so npm-check-updates doesn't look
+// for one of the project's.
+const EMPTY_CONFIG = fileURLToPath(new URL("../ncurc.empty.json", import.meta.url));
+
 /**
- * Options set whatever the config file says, since they'd change what
- * npm-check-updates does or prints: it must only look (never rewrite a
- * package file, install, prompt or run tests), answer for just the package
- * it's given, and print its upgrades as JSON with a zero exit code. The
- * command line's options win over the config file's.
+ * Options set whatever npm-check-updates' defaults (or a future config
+ * file) say, since they'd change what it does or prints: it must only look
+ * (never rewrite a package file, install, prompt or run tests), answer for
+ * just the package it's given, and print its upgrades as JSON with a zero
+ * exit code.
  */
 function pinnedOptions(root: string): string[] {
   return [
-    "--configFilePath",
-    root,
+    "--configFileName",
+    EMPTY_CONFIG,
     "--cwd",
     root,
     "--no-upgrade",
@@ -92,44 +112,27 @@ function upgradesOf(value: unknown): Upgrades {
   return upgrades;
 }
 
-/** The named dependencies in one package.json (relative to the root) that have a newer release. */
-export async function manifestUpgrades(
-  options: NcuOptions,
-  manifest: string,
-  names: string[],
-): Promise<Upgrades> {
+/** The named dependencies that have a newer release (on their major, for target "minor"). */
+export async function newerReleases(options: NcuOptions, query: NcuQuery): Promise<Upgrades> {
+  if (query.names.length === 0) return new Map();
+  const source =
+    query.packageFile === undefined
+      ? [
+          "--packageData",
+          JSON.stringify({ dependencies: Object.fromEntries(query.dependencies ?? []) }),
+        ]
+      : ["--packageFile", query.packageFile];
   return upgradesOf(
     await runNcu(options, [
-      "--packageFile",
-      manifest,
-      // The sections latest-or-bust compares, whatever the config file says.
+      ...source,
+      ...(options.packageManager === undefined ? [] : ["--packageManager", options.packageManager]),
+      // The sections latest-or-bust compares.
       "--dep",
       "prod,dev,optional",
+      "--target",
+      query.target,
       "--filter",
-      names.join(","),
-    ]),
-  );
-}
-
-/**
- * The entries of one pnpm catalog (name to spec) that have a newer release.
- * npm-check-updates' --workspaces merges every catalog into one list by
- * package name, so a name in two catalogs would be judged by only one of its
- * specs, and it needs pnpm-lock.yaml to know to read them. So it's handed
- * one catalog's entries as a package of its own, as pnpm (for the
- * cooldown), instead.
- */
-export async function catalogUpgrades(options: NcuOptions, entries: Specs): Promise<Upgrades> {
-  return upgradesOf(
-    await runNcu(options, [
-      "--packageData",
-      JSON.stringify({ dependencies: Object.fromEntries(entries) }),
-      "--packageManager",
-      "pnpm",
-      "--dep",
-      "prod",
-      "--filter",
-      [...entries.keys()].join(","),
+      query.names.join(","),
     ]),
   );
 }

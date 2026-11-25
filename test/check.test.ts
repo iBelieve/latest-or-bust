@@ -113,25 +113,70 @@ describe("check", () => {
     assert.deepEqual(result.outdated, []);
   });
 
-  it("skips what the root .ncurc rejects, in every package", async () => {
-    npmProject({ workspaces: ["packages/*"] });
+  it("skips what latest-or-bust.json exempts, in every package and catalog", async () => {
+    pnpmProject("packages:\n  - 'packages/*'\n");
     const base = repo.commit();
-    npmProject(
-      { workspaces: ["packages/*"], dependencies: { foo: "1.0.0" } },
-      {
-        ".ncurc.json": { reject: ["foo"] },
-        "packages/a/package.json": { dependencies: { foo: "1.0.0", baz: "3.0.0" } },
-      },
-    );
+    pnpmProject("packages:\n  - 'packages/*'\ncatalog:\n  foo: 1.0.0\n", {
+      "latest-or-bust.json": { exempt: { foo: { reason: "foo 1.2 breaks us" } } },
+      "package.json": { name: "root", dependencies: { foo: "1.0.0" } },
+      "packages/a/package.json": { dependencies: { foo: "1.1.0", baz: "3.0.0" } },
+    });
     const result = await run(base);
     assert.deepEqual(
       result.checked,
       new Map([
         ["package.json", ["foo"]],
         ["packages/a/package.json", ["baz", "foo"]],
+        ["pnpm-workspace.yaml", ["foo"]],
       ]),
     );
+    const reason = "foo 1.2 breaks us";
+    assert.deepEqual(result.exempted, [
+      { file: "package.json", name: "foo", reason },
+      { file: "packages/a/package.json", name: "foo", reason },
+      { file: "pnpm-workspace.yaml", name: "foo", reason },
+    ]);
     assert.deepEqual(result.outdated, []);
+  });
+
+  it('wants the newest release on the major for "allow": "minor"', async () => {
+    const config = {
+      exempt: {
+        "@scope/bar": { reason: "bar 2 drops Node.js 22", allow: "minor" },
+        foo: { reason: "foo 2 isn't out, so this changes nothing", allow: "minor" },
+      },
+    };
+    npmProject({ dependencies: {} });
+    const base = repo.commit();
+    npmProject(
+      { dependencies: { "@scope/bar": "^1.0.0", foo: "1.1.0" } },
+      { "latest-or-bust.json": config },
+    );
+    const result = await run(base);
+    // @scope/bar's 2.0.0 is out, but 1.0.0 is the newest 1.x; foo's 1.2.0 is the newest 1.x.
+    assert.deepEqual(outdated(result), ["package.json foo 1.1.0 → 1.2.0"]);
+    assert.deepEqual(
+      result.exempted.map(({ name, allow }) => `${name} ${String(allow)}`),
+      ["@scope/bar minor", "foo minor"],
+    );
+  });
+
+  it("fails on an invalid latest-or-bust.json", async () => {
+    npmProject({});
+    const base = repo.commit();
+    repo.write({ "latest-or-bust.json": { exempt: { foo: {} } } });
+    await assert.rejects(run(base), /exempt\.foo needs a reason/);
+  });
+
+  it("applies pnpm's cooldown without pnpm-lock.yaml", async () => {
+    repo.write({ ".npmrc": `registry=${registry.url}\n`, "package.json": { dependencies: {} } });
+    const base = repo.commit();
+    repo.write({
+      "package.json": { dependencies: { foo: "1.2.0" } },
+      "pnpm-workspace.yaml": "minimumReleaseAge: 1440\n",
+    });
+    // Not "1.2.0 → 1.3.0": 1.3.0 is younger than a day.
+    assert.deepEqual(outdated(await run(base)), []);
   });
 
   it("checks npm workspace packages, new ones too, and nothing outside them", async () => {
@@ -209,7 +254,7 @@ describe("check", () => {
     assert.deepEqual(outdated(await run(base)), ["pnpm-workspace.yaml foo 1.1.0 → 1.2.0"]);
   });
 
-  it("ignores .ncurc options that would change what npm-check-updates does", async () => {
+  it("ignores .ncurc, whatever it says", async () => {
     npmProject({ workspaces: ["packages/*"] });
     const base = repo.commit();
     const manifest = {
@@ -227,7 +272,10 @@ describe("check", () => {
       },
       "packages/a/package.json": { name: "a" },
     });
-    assert.deepEqual(outdated(await run(base)), ["package.json foo 1.0.0 → 1.2.0"]);
+    assert.deepEqual(outdated(await run(base)), [
+      "package.json @scope/bar 1.0.0 → 2.0.0",
+      "package.json foo 1.0.0 → 1.2.0",
+    ]);
     assert.deepEqual(JSON.parse(readFileSync(join(repo.root, "package.json"), "utf8")), manifest);
   });
 

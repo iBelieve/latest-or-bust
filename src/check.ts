@@ -4,6 +4,7 @@
 // checked: keeping those current is a job for Dependabot or Renovate.
 
 import { posix } from "node:path";
+import { CONFIG_FILE, parseConfig, type Config } from "./config.ts";
 import { atRevision, inWorkingTree, packageDirectories } from "./git.ts";
 import {
   catalogSpecs,
@@ -14,7 +15,7 @@ import {
   workspacePatterns,
   type Specs,
 } from "./manifests.ts";
-import { catalogUpgrades, manifestUpgrades, type NcuOptions, type Upgrades } from "./ncu.ts";
+import { newerReleases, type NcuOptions, type NcuQuery, type Upgrades } from "./ncu.ts";
 
 const PNPM_WORKSPACE = "pnpm-workspace.yaml";
 
@@ -28,13 +29,25 @@ export interface Outdated {
   latest: string;
 }
 
+export interface Exempted {
+  file: string;
+  name: string;
+  reason: string;
+  /** "minor" if it was checked against the newest release on its major; undefined if it wasn't checked. */
+  allow?: "minor";
+}
+
 export interface CheckResult {
-  /** Each file with added or changed dependencies, with their names. */
+  /** Each file with added or changed dependencies, with their names (exempt ones too). */
   checked: Map<string, string[]>;
+  /** The added or changed dependencies latest-or-bust.json exempts. */
+  exempted: Exempted[];
   outdated: Outdated[];
 }
 
-export interface CheckOptions extends NcuOptions {
+export interface CheckOptions {
+  /** The repository root. */
+  root: string;
   /** The commit to compare the working tree with. */
   base: string;
 }
@@ -57,11 +70,47 @@ function outdatedIn(file: string, current: Specs, upgrades: Upgrades): Outdated[
   }));
 }
 
+/**
+ * Asks about one file's changed dependencies, minus the exempt ones: those
+ * allowed to stay on their major are asked about with target "minor", and
+ * the rest aren't asked about at all.
+ */
+async function checkFile(
+  ncu: NcuOptions,
+  config: Config,
+  result: CheckResult,
+  file: string,
+  query: Omit<NcuQuery, "names" | "target">,
+  changed: Specs,
+): Promise<void> {
+  const latest: string[] = [];
+  const minor: string[] = [];
+  for (const name of changed.keys()) {
+    const exemption = config.exempt.get(name);
+    if (exemption === undefined) {
+      latest.push(name);
+      continue;
+    }
+    result.exempted.push({ file, name, ...exemption });
+    if (exemption.allow === "minor") minor.push(name);
+  }
+  const outdated: Outdated[] = [];
+  for (const [names, target] of [
+    [latest, "latest"],
+    [minor, "minor"],
+  ] as const) {
+    const found = await newerReleases(ncu, { ...query, names: [...names], target });
+    outdated.push(...outdatedIn(file, changed, found));
+  }
+  result.outdated.push(...outdated.toSorted((a, b) => (a.name < b.name ? -1 : 1)));
+}
+
 export async function check(options: CheckOptions): Promise<CheckResult> {
   const { root, base } = options;
-  const result: CheckResult = { checked: new Map(), outdated: [] };
+  const result: CheckResult = { checked: new Map(), exempted: [], outdated: [] };
   const before = (path: string) => atRevision(root, base, path);
   const now = (path: string) => inWorkingTree(root, path);
+  const config = parseConfig(now(CONFIG_FILE));
 
   const rootManifest = now("package.json");
   const workspace = now(PNPM_WORKSPACE);
@@ -77,6 +126,10 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
       `There's no package.json or ${PNPM_WORKSPACE} at the repository root (${root}), or at ${base}: latest-or-bust checks the project there`,
     );
   }
+  // A pnpm project, even without pnpm-lock.yaml (which npm-check-updates
+  // would need to know it), so pnpm's cooldown applies.
+  const isPnpm = workspace !== undefined || now("pnpm-lock.yaml") !== undefined;
+  const ncu: NcuOptions = { root, ...(isPnpm ? { packageManager: "pnpm" } : {}) };
   const patterns = parsing(`the workspace packages in package.json or ${PNPM_WORKSPACE}`, () =>
     workspacePatterns(rootManifest, workspace),
   );
@@ -88,12 +141,10 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
     const [text, previousText] = [now(manifest), before(manifest)];
     const current = parsing(manifest, () => manifestSpecs(text));
     const previous = parsing(`${manifest} at ${base}`, () => manifestSpecs(previousText));
-    const names = changedNames(previous, current);
-    if (names.length === 0) continue;
-    result.checked.set(manifest, names);
-    result.outdated.push(
-      ...outdatedIn(manifest, current, await manifestUpgrades(options, manifest, names)),
-    );
+    const changed = changedEntries(previous, current).get("");
+    if (changed === undefined) continue;
+    result.checked.set(manifest, [...changed.keys()].toSorted());
+    await checkFile(ncu, config, result, manifest, { packageFile: manifest }, changed);
   }
 
   const catalog = parsing(PNPM_WORKSPACE, () => catalogSpecs(workspace));
@@ -105,9 +156,7 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
     result.checked.set(PNPM_WORKSPACE, catalogNames);
     // Each catalog on its own, so each entry is judged by its own spec.
     for (const entries of changedEntries(previousCatalog, catalog).values()) {
-      result.outdated.push(
-        ...outdatedIn(PNPM_WORKSPACE, entries, await catalogUpgrades(options, entries)),
-      );
+      await checkFile(ncu, config, result, PNPM_WORKSPACE, { dependencies: entries }, entries);
     }
   }
   return result;

@@ -7,9 +7,16 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
 
 - `src/manifests.ts`: pure functions over file contents (specs, workspace
   patterns, what changed). `src/git.ts`: the base revision and files at it.
-  `src/ncu.ts`: runs npm-check-updates' own command line (so it reads
-  `.ncurc` and the package manager's cooldown just as `ncu` does).
-  `src/check.ts` ties them together; `src/cli.ts` is the command
+  `src/config.ts`: `latest-or-bust.json`, the exemptions (each needs a
+  reason); `schema.json` describes it for editors. `src/ncu.ts`: runs
+  npm-check-updates' own command line (so it reads `.npmrc` and the
+  package manager's cooldown just as `ncu` does), with an empty config file
+  (`ncurc.empty.json`) and options pinned, so a project's `.ncurc` can't
+  change what it does. `src/check.ts` ties them together; `src/cli.ts` is
+  the command
+- latest-or-bust's own config is the interface; npm-check-updates is an
+  implementation detail that could be swapped out, so don't expose its
+  options
 - npm-check-updates runs asynchronously on purpose: the tests' fake registry
   (`test/fixtures.ts`) answers from the test's own process, so a synchronous
   spawn would deadlock

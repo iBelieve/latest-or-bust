@@ -18,7 +18,7 @@ Not the newest release:
   package.json  react  ^19.3.1 → ^19.3.2
   packages/web/package.json  vite  7.4.0 → 7.5.1
 
-Update them, or if one is held back on purpose, add it to `reject` in the root .ncurc file with a comment saying why.
+Update them, or if one is held back on purpose, exempt it in latest-or-bust.json with the reason why.
 ```
 
 ## Usage
@@ -74,26 +74,38 @@ which reads your registry settings from `.npmrc`, and honors the package manager
 cooldown, so it never asks for a release your package manager won't install yet:
 
 - npm: `min-release-age` in `.npmrc`
-- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` (npm-check-updates knows it's a pnpm project by
-  its `pnpm-lock.yaml`)
+- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` (a project with `pnpm-workspace.yaml` or
+  `pnpm-lock.yaml` is a pnpm project)
+
+latest-or-bust doesn't read npm-check-updates' own config files (`.ncurc` and the like), so the
+options there can't change what it checks.
 
 ## Holding a dependency back
 
-To keep a dependency on an older version on purpose, add it to `reject` in an
-[npm-check-updates config file](https://github.com/raineorshine/npm-check-updates#config-file) at the
-repository root, with a comment saying why. latest-or-bust reads that file for every package in the
-workspace. For example, `.ncurc.cjs`:
+To keep a dependency on an older version on purpose, exempt it in `latest-or-bust.json` at the
+repository root, with the reason why. Every exemption needs a reason, and applies in every package
+and catalog:
 
-```js
-module.exports = {
-  reject: [
-    // @types/foo only covers 1.x, and foo 2 ships no types of its own
-    "foo",
-  ],
-};
+```json
+{
+  "$schema": "./node_modules/latest-or-bust/schema.json",
+  "exempt": {
+    "@types/foo": {
+      "reason": "Only covers foo 1.x, and foo 2 ships no types of its own",
+      "allow": "minor"
+    },
+    "bar": { "reason": "bar 3 drops Node.js 22" }
+  }
+}
 ```
 
-A rejected dependency is skipped entirely, so take it off the list once the reason is gone.
+- `"allow": "minor"`: the dependency may stay on its current major version, but must be the newest
+  release there. If you add `@types/foo` at `^1.4.0` when 1.5.0 and 2.0.0 are out, it fails, asking
+  for `^1.5.0`.
+- No `allow`: the dependency isn't checked at all.
+
+Exempt dependencies are listed in the output with their reasons. Take an exemption off once its
+reason is gone.
 
 ## Package managers
 

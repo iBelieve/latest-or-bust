@@ -2,8 +2,9 @@
 // latest-or-bust [base revision]: fails if a dependency added or changed since
 // the base isn't the newest release. See README.md.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { check, type CheckResult } from "./check.ts";
+import { CONFIG_FILE } from "./config.ts";
 import { defaultBase, repositoryRoot, resolveCommit } from "./git.ts";
 import { isRecord } from "./manifests.ts";
 
@@ -18,8 +19,13 @@ and pnpm-workspace.yaml's catalogs.
 The base defaults to where HEAD branched from origin's default branch. On a
 GitHub pull_request run, pass HEAD^ (with actions/checkout's fetch-depth: 2).
 
-To hold a dependency back on purpose, add it to \`reject\` in an .ncurc file at
-the repository root, with a comment saying why.
+To hold a dependency back on purpose, exempt it in latest-or-bust.json at the
+repository root, with the reason why:
+
+  { "exempt": { "foo": { "reason": "foo 3 drops Node.js 22", "allow": "minor" } } }
+
+"allow": "minor" still wants the newest release on its current major; without
+it, the dependency isn't checked.
 
 Options:
   -h, --help     Show this help
@@ -42,6 +48,13 @@ function report(result: CheckResult): boolean {
   for (const [file, names] of result.checked) {
     console.log(`${file}: ${names.join(", ")}`);
   }
+  if (result.exempted.length > 0) {
+    console.log(`\nExempt in ${CONFIG_FILE}:`);
+    for (const { file, name, reason, allow } of result.exempted) {
+      const how = allow === "minor" ? "newest on its major" : "not checked";
+      console.log(`  ${file}  ${name}  (${how}: ${reason})`);
+    }
+  }
   if (result.outdated.length === 0) {
     console.log("\nAll of them are the newest release.");
     return true;
@@ -51,7 +64,7 @@ function report(result: CheckResult): boolean {
     console.error(`  ${file}  ${name}  ${spec} → ${latest}`);
   }
   console.error(
-    "\nUpdate them, or if one is held back on purpose, add it to `reject` in the root .ncurc file with a comment saying why.",
+    `\nUpdate them, or if one is held back on purpose, exempt it in ${CONFIG_FILE} with the reason why.`,
   );
   return false;
 }
@@ -77,6 +90,12 @@ async function main(args: string[]): Promise<boolean> {
     return false;
   }
   const root = repositoryRoot(process.cwd());
+  const ncurc = readdirSync(root).filter((file) => /^\.ncurc(\.[a-z]+)?$/.test(file));
+  if (ncurc.length > 0) {
+    console.error(
+      `Note: latest-or-bust doesn't read ${ncurc.join(", ")}; it takes its exemptions from ${CONFIG_FILE}.`,
+    );
+  }
   const requested = first ?? defaultBase(root);
   const base = resolveCommit(root, requested);
   console.log(

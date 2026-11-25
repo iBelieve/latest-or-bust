@@ -133,6 +133,26 @@ describe("latest-or-bust", () => {
       run.stderr,
       /Not the newest release:\n {2}package\.json {2}foo {2}\^1\.0\.0 → \^1\.1\.0\n/,
     );
-    assert.match(run.stderr, /add it to `reject` in the root \.ncurc/);
+    assert.match(run.stderr, /exempt it in latest-or-bust\.json with the reason why/);
+  });
+
+  it("lists exemptions, and says it doesn't read .ncurc", async () => {
+    repo.write({ "package.json": {} });
+    repo.commit();
+    repo.write({
+      ".ncurc.cjs": "module.exports = { reject: ['foo'] };\n",
+      "latest-or-bust.json": { exempt: { foo: { reason: "foo 1.1 breaks us" } } },
+      "package.json": { dependencies: { foo: "1.0.0" } },
+    });
+    const run = await cli(repo.root, "HEAD");
+    assert.equal(run.code, 0, run.stderr);
+    assert.match(
+      run.stderr,
+      /doesn't read \.ncurc\.cjs; it takes its exemptions from latest-or-bust\.json/,
+    );
+    assert.match(
+      run.stdout,
+      /Exempt in latest-or-bust\.json:\n {2}package\.json {2}foo {2}\(not checked: foo 1\.1 breaks us\)\n/,
+    );
   });
 });
