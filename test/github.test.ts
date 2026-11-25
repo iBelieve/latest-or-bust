@@ -79,6 +79,7 @@ function payload(pr: PullRequest, author = "someone"): object {
       number: 1,
       user: { login: author },
       base: { ref: "main", sha: pr.baseSha },
+      head: { sha: pr.head },
     },
   };
 }
@@ -92,7 +93,7 @@ describe("detect", () => {
 
   it("has nothing to check on a run that isn't for a pull request", () => {
     upstream.commit();
-    for (const event of ["push", "schedule", "merge_group", "pull_request_target"]) {
+    for (const event of ["push", "schedule", "merge_group"]) {
       const detected = detect(upstream.root, environment(event));
       assert.ok(detected !== undefined && "skip" in detected);
       assert.match(
@@ -100,6 +101,13 @@ describe("detect", () => {
         new RegExp(`^Not a pull request \\(this is a GitHub Actions ${event} run\\)`),
       );
     }
+  });
+
+  it("has nothing to check on a pull_request_target run, which runs on the base branch", () => {
+    upstream.commit();
+    const detected = detect(upstream.root, environment("pull_request_target"));
+    assert.ok(detected !== undefined && "skip" in detected);
+    assert.match(detected.skip, /^This is a GitHub Actions pull_request_target run, which runs on/);
   });
 
   it("compares a pull request's merge with the base it was made from, fetching it", () => {
@@ -113,12 +121,24 @@ describe("detect", () => {
     execFileSync("git", ["cat-file", "-e", `${pr.mergedInto}:c.txt`], { cwd: clone });
   });
 
+  it("compares a merge GitHub made again after the base moved with its first parent too", () => {
+    const pr = pullRequest();
+    // Checked out by its ref, with the history, so GITHUB_SHA (the merge when
+    // the event fired) is another commit and the payload's base sha is behind.
+    const clone = checkout("refs/pull/1/merge", 0);
+    const earlier = "0".repeat(40);
+    assert.deepEqual(detect(clone, environment("pull_request", payload(pr), earlier)), {
+      base: pr.mergedInto,
+      label: "main, pull request #1's base",
+    });
+  });
+
   it("compares a pull request's head with where it branched from the base", () => {
     const pr = pullRequest();
     const clone = checkout("feature", 0);
     assert.deepEqual(detect(clone, environment("pull_request", payload(pr), pr.merge)), {
       base: pr.baseSha,
-      label: "main, pull request #1's base",
+      label: "where pull request #1 branched from main",
     });
   });
 
@@ -137,7 +157,14 @@ describe("detect", () => {
     execFileSync("git", ["remote", "set-url", "origin", join(dir, "gone")], { cwd: clone });
     assert.throws(
       () => detect(clone, environment("pull_request", payload(pr), pr.merge)),
-      new RegExp(`Can't fetch ${pr.mergedInto} from origin`),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, new RegExp(`Can't fetch ${pr.mergedInto} from origin`));
+        // With git's own reason.
+        assert.equal(typeof error.cause, "string");
+        assert.notEqual(error.cause, "");
+        return true;
+      },
     );
   });
 
@@ -165,6 +192,16 @@ describe("detect", () => {
     assert.throws(
       () => detect(upstream.root, { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "pull_request" }),
       /GITHUB_EVENT_PATH isn't set/,
+    );
+  });
+
+  it("names the event payload if it can't read it", () => {
+    upstream.commit();
+    const env = environment("pull_request");
+    writeFileSync(env["GITHUB_EVENT_PATH"] ?? "", "{ not json");
+    assert.throws(
+      () => detect(upstream.root, env),
+      /Can't read the event payload at .*event\.json/,
     );
   });
 });

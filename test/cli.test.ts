@@ -217,11 +217,16 @@ describe("latest-or-bust", () => {
       const base = repo.commit();
       repo.git("checkout", "--quiet", "-b", "feature");
       repo.write({ "package.json": { dependencies: { foo: "1.0.0" } } });
-      repo.commit();
+      const head = repo.commit();
       repo.git("checkout", "--quiet", "--detach", base);
       repo.git("merge", "--quiet", "--no-ff", "--message", "Merge", "feature");
       const payload = {
-        pull_request: { number: 7, user: { login: "someone" }, base: { ref: "main", sha: base } },
+        pull_request: {
+          number: 7,
+          user: { login: "someone" },
+          base: { ref: "main", sha: base },
+          head: { sha: head },
+        },
       };
       const run = await cli(repo.root, [], github("pull_request", payload));
       assert.equal(run.code, 1);

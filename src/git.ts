@@ -71,11 +71,17 @@ export function parents(root: string, commit: string): string[] {
 /** Makes sure `commit` is here, fetching it from origin if it isn't (into a shallow clone, say). */
 export function ensureCommit(root: string, commit: string): void {
   if (tryGit(root, ["cat-file", "-e", `${commit}^{commit}`]) !== undefined) return;
-  if (
-    tryGit(root, ["fetch", "--quiet", "--no-tags", "--depth=1", "origin", commit]) === undefined
-  ) {
+  const fetch = spawnSync("git", ["fetch", "--quiet", "--no-tags", "--depth=1", "origin", commit], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (fetch.error !== undefined) throw fetch.error;
+  if (fetch.status !== 0) {
+    // Git's own reason (no access, say), so it's not a guess.
+    const reason = fetch.stderr.trim();
     throw new Error(
       `Can't fetch ${commit} from origin; fetch it first (with actions/checkout's fetch-depth: 2, say), or pass the base revision`,
+      reason === "" ? {} : { cause: reason },
     );
   }
 }
