@@ -34,28 +34,39 @@ a dependency added or changed since then isn't the newest release, and 0 otherwi
 
 ### In GitHub Actions
 
-On a `pull_request` run, `actions/checkout` checks out the merge of the pull request into its base,
-so `HEAD^` is the base:
+Run it with no arguments in a workflow that runs on pull requests, and it works out what to compare
+with on its own:
 
 ```yaml
-on: pull_request
+on: [push, pull_request]
 
 jobs:
   dependencies:
     runs-on: ubuntu-latest
-    # Optional: Dependabot's grouped minor-and-patch PRs don't move a dependency
-    # to a new major version even when one is out, so they'd fail this.
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
-      - run: npx latest-or-bust HEAD^
+      - run: npx latest-or-bust
 ```
+
+- On a `pull_request` run, it compares with the pull request's base. `actions/checkout` checks out
+  the merge of the pull request into its base, so that's the merge's first parent; in a shallow
+  clone (the default), latest-or-bust fetches that one commit. If you check out the pull request's
+  own head instead, it compares with where that branched from the base, which needs the history
+  (`fetch-depth: 0`).
+- Any other run, such as a push to the default branch, a schedule or a merge queue, passes with a
+  note that there's nothing to check: there's no change to compare, and the pull request was
+  checked when it was open. So the same workflow can run on pushes and pull requests.
+- Pull requests from Dependabot and Renovate pass too. Their grouped minor-and-patch pull requests
+  don't move a dependency to a new major version even when one is out, so they'd fail the check for
+  doing what they're set up to do.
+
+Pass a base revision to skip all of this and compare with it (`npx latest-or-bust origin/main`).
+Outside GitHub Actions, it always compares with the base revision, or where `HEAD` branched from
+`origin`.
 
 ## What it checks
 

@@ -15,6 +15,8 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
   lookup fails the check) and options pinned, so a project's `.ncurc` can't
   change what it does. `src/check.ts` ties them together; `src/cli.ts` is
   the command
+- `src/github.ts`: on GitHub Actions, the base when none is passed (a pull
+  request's), or that the run has nothing to check
 - latest-or-bust's own config is the interface; npm-check-updates is an
   implementation detail that could be swapped out, so don't expose its
   options
@@ -39,8 +41,9 @@ needs a line in its `needs`.
 - `pnpm test` (node:test; CI runs it on Node.js 22, 24 and 26, the lines
   `engines` allows). The tests use throwaway git repositories and a fake
   registry, never the real one
-- On pull requests, `node dist/cli.js HEAD^`: latest-or-bust checks its own
-  dependencies, so add a dependency at its newest release
+- `node dist/cli.js`: latest-or-bust checks its own dependencies (against a
+  pull request's base; other runs pass), so add a dependency at its newest
+  release
 - actionlint over the workflows
 - `minimumReleaseAge` in `pnpm-workspace.yaml` rejects releases under a day
   old, so don't pin a version published today

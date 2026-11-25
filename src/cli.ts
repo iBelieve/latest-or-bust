@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { check, type CheckResult, type Place } from "./check.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { defaultBase, repositoryRoot, resolveCommit } from "./git.ts";
+import { detect } from "./github.ts";
 import { isRecord } from "./manifests.ts";
 
 const USAGE = `Usage: latest-or-bust [base revision]
@@ -16,8 +17,11 @@ since the base revision isn't the newest release npm-check-updates finds
 minimumReleaseAge). Checks the root package.json, every workspace package's,
 and pnpm-workspace.yaml's catalogs.
 
-The base defaults to where HEAD branched from origin's default branch. On a
-GitHub pull_request run, pass HEAD^ (with actions/checkout's fetch-depth: 2).
+The base defaults to where HEAD branched from origin's default branch. On
+GitHub Actions, it's the pull request's base on a pull_request run, and any
+other run (a push, say) has nothing to check and passes, as do pull requests
+from Dependabot and Renovate. Pass a base revision to check against it
+regardless.
 
 To hold a dependency back on purpose, exempt it in latest-or-bust.json at the
 repository root, with the reason why:
@@ -114,17 +118,28 @@ async function main(args: string[]): Promise<boolean> {
     return false;
   }
   const root = repositoryRoot(process.cwd());
+  const detected = first === undefined ? detect(root, process.env) : undefined;
+  if (detected !== undefined && "skip" in detected) {
+    console.log(detected.skip);
+    return true;
+  }
   const ncurc = readdirSync(root).filter((file) => /^\.ncurc(\.[a-z]+)?$/.test(file));
   if (ncurc.length > 0) {
     console.error(
       `Note: latest-or-bust doesn't read ${ncurc.join(", ")}; it takes its exemptions from ${CONFIG_FILE}.`,
     );
   }
-  const requested = first ?? defaultBase(root);
-  const base = resolveCommit(root, requested);
-  console.log(
-    `Checking dependencies added or changed since ${requested === base ? base : `${requested} (${base})`}`,
-  );
+  let since: string;
+  let base: string;
+  if (detected !== undefined) {
+    base = detected.base;
+    since = `${detected.label} (${base})`;
+  } else {
+    const requested = first ?? defaultBase(root);
+    base = resolveCommit(root, requested);
+    since = requested === base ? base : `${requested} (${base})`;
+  }
+  console.log(`Checking dependencies added or changed since ${since}`);
   return report(await check({ root, base }));
 }
 

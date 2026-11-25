@@ -5,6 +5,12 @@ it's below 1.0, a minor version may change behaviour.
 
 ## Unreleased
 
+- On GitHub Actions, with no base revision, it works out what to compare with: a `pull_request` run
+  compares with the pull request's base (fetching that commit into a shallow clone), and any other
+  run, along with pull requests from Dependabot and Renovate, passes with a note that there's nothing
+  to check. A base revision passed on the command line still wins. A workflow no longer needs
+  `fetch-depth: 2`, `HEAD^` or an `if:` on the event.
+
 ## 0.1.0
 
 The first release: the new-dependency check from iBelieve/ehymnboard, as a package.
