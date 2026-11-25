@@ -160,8 +160,11 @@ function upgradesOf(value: unknown): Upgrades {
 function withCooldown(names: string[], cooldown: Cooldown | undefined): [string[], string[]][] {
   if (cooldown === undefined) return [[names, []]];
   const exclude = new Set(cooldown.exclude);
+  // A bare number of days, which npm-check-updates parses as a JavaScript
+  // number: "<n>m" takes only plain decimals, not String()'s "1e-9".
+  const days = String(cooldown.minutes / (24 * 60));
   return [
-    [names.filter((name) => !exclude.has(name)), ["--cooldown", `${cooldown.minutes}m`]],
+    [names.filter((name) => !exclude.has(name)), ["--cooldown", days]],
     [names.filter((name) => exclude.has(name)), ["--cooldown", "0"]],
   ];
 }

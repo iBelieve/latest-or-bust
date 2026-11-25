@@ -62,21 +62,26 @@ export function detectPackageManager(
 }
 
 /**
- * Bun's release-age cooldown, from bunfig.toml's `[install]` table:
- * `minimumReleaseAge` (seconds) and `minimumReleaseAgeExcludes` (package
- * names it doesn't apply to). Undefined when there's no file or setting;
- * throws if they aren't a number and a list of names.
+ * Bun's release-age cooldown, from the `[install]` table of bunfig.toml
+ * files, the project's first and then the global one: `minimumReleaseAge`
+ * (seconds) and `minimumReleaseAgeExcludes` (package names it doesn't apply
+ * to), each from the first file that sets it, as Bun merges them.
+ * Undefined when no file sets minimumReleaseAge; throws if they aren't a
+ * number and a list of names.
  */
-export function bunCooldown(bunfig: string | undefined): Cooldown | undefined {
-  if (bunfig === undefined) return undefined;
-  const install = parse(bunfig)["install"];
-  if (!isRecord(install)) return undefined;
-  const seconds = install["minimumReleaseAge"];
+export function bunCooldown(...bunfigs: (string | undefined)[]): Cooldown | undefined {
+  const installs = bunfigs.map((bunfig) => {
+    const install = bunfig === undefined ? undefined : parse(bunfig)["install"];
+    return isRecord(install) ? install : {};
+  });
+  const setting = (key: string): unknown =>
+    installs.find((install) => install[key] !== undefined)?.[key];
+  const seconds = setting("minimumReleaseAge");
   if (seconds === undefined) return undefined;
   if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
     throw new Error("install.minimumReleaseAge must be a number of seconds");
   }
-  const exclude = install["minimumReleaseAgeExcludes"] ?? [];
+  const exclude = setting("minimumReleaseAgeExcludes") ?? [];
   if (!Array.isArray(exclude) || !exclude.every((name) => typeof name === "string")) {
     throw new Error("install.minimumReleaseAgeExcludes must be a list of package names");
   }

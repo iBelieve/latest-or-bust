@@ -1,7 +1,8 @@
 // End to end through git and npm-check-updates, against a fake registry.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, afterEach, describe, it } from "node:test";
 import { check, type CheckResult } from "../src/check.ts";
@@ -36,11 +37,22 @@ before(async () => {
 
 after(() => registry.close());
 
+// Where Bun's global bunfig.toml is read from, so the tests don't see the user's own.
+let configHome: string;
+const userConfigHome = process.env["XDG_CONFIG_HOME"];
+
 beforeEach(() => {
   repo = createRepository();
+  configHome = mkdtempSync(join(tmpdir(), "latest-or-bust-config-"));
+  process.env["XDG_CONFIG_HOME"] = configHome;
 });
 
-afterEach(() => repo.remove());
+afterEach(() => {
+  repo.remove();
+  rmSync(configHome, { recursive: true, force: true });
+  if (userConfigHome === undefined) delete process.env["XDG_CONFIG_HOME"];
+  else process.env["XDG_CONFIG_HOME"] = userConfigHome;
+});
 
 /** An npm project: package-lock.json makes npm-check-updates read .npmrc's min-release-age. */
 function npmProject(manifest: object, files: Record<string, string | object> = {}): void {
@@ -357,6 +369,23 @@ describe("check", () => {
     const result = await run(base);
     assert.deepEqual(result.checked, new Map([["package.json", ["foo", "hot"]]]));
     assert.deepEqual(outdated(result), ["package.json hot 1.0.0 → 1.1.0"]);
+  });
+
+  it("takes Bun's minimumReleaseAge from the global bunfig.toml, never from .npmrc", async () => {
+    bunProject({ dependencies: {} });
+    const base = repo.commit();
+    // Bun doesn't read .npmrc's min-release-age: without a cooldown, 1.3.0 is the newest.
+    repo.write({
+      ".npmrc": `registry=${registry.url}\nmin-release-age=1\n`,
+      "bunfig.toml": "[install]\n",
+      "package.json": { dependencies: { foo: "1.2.0" } },
+    });
+    assert.deepEqual(outdated(await run(base)), ["package.json foo 1.2.0 → 1.3.0"]);
+    writeFileSync(join(configHome, ".bunfig.toml"), "[install]\nminimumReleaseAge = 86400\n");
+    assert.deepEqual(outdated(await run(base)), []);
+    // A cooldown small enough that String() writes it with an exponent.
+    repo.write({ "bunfig.toml": "[install]\nminimumReleaseAge = 0.000001\n" });
+    assert.deepEqual(outdated(await run(base)), ["package.json foo 1.2.0 → 1.3.0"]);
   });
 
   it("checks Bun's catalogs in the root package.json", async () => {

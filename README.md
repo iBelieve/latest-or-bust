@@ -81,7 +81,8 @@ release your package manager won't install yet:
 - pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml`
 - Yarn: `npmMinimalAgeGate` in the `.yarnrc.yml` next to `yarn.lock`, or in your home directory
   (Yarn 4.10 and later; Yarn 1 has none)
-- Bun: `minimumReleaseAge` and `minimumReleaseAgeExcludes` in `bunfig.toml`'s `[install]`
+- Bun: `minimumReleaseAge` and `minimumReleaseAgeExcludes` in `bunfig.toml`'s `[install]`, or in
+  the global `.bunfig.toml` (in `$XDG_CONFIG_HOME`, else your home directory)
 
 A dependency it can't look up, because it isn't on the registry or the registry is unreachable or
 refuses the login, fails the check too: there's no telling whether it's the newest.
@@ -120,8 +121,9 @@ reason is gone.
 
 npm, pnpm, Yarn (1 and 2 and later) and Bun are supported. The package manager is the one the root
 `package.json`'s `packageManager` names, else the one whose lockfile is at the root
-(`pnpm-lock.yaml`, `yarn.lock`, `bun.lock` or `bun.lockb`, `package-lock.json`), else the one whose
-config file is (`pnpm-workspace.yaml`, `.yarnrc.yml`, `bunfig.toml`), else npm.
+(`pnpm-lock.yaml`, `yarn.lock`, `bun.lock` or `bun.lockb`, `package-lock.json` or
+`npm-shrinkwrap.json`), else the one whose config file is (`pnpm-workspace.yaml`, `.yarnrc.yml`,
+`bunfig.toml`), else npm.
 
 Registry settings that only Yarn 2+ or Bun read (`.yarnrc.yml`'s top-level `npmRegistryServer` and
 `npmAuthToken`, `bunfig.toml`'s registries) aren't used: a dependency from such a registry fails as

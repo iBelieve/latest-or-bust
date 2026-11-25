@@ -9,7 +9,7 @@ it's below 1.0, a minor version may change behaviour.
   the one whose lockfile, else config file, is at the root.
 - Checks Yarn's catalogs in `.yarnrc.yml` and Bun's in the root `package.json`.
 - Honors Yarn's `npmMinimalAgeGate` and Bun's `minimumReleaseAge` (with
-  `minimumReleaseAgeExcludes`).
+  `minimumReleaseAgeExcludes`, in `bunfig.toml` or the global `.bunfig.toml`).
 
 ## 0.1.0
 

@@ -1,7 +1,7 @@
 // Finds the dependencies a change adds, or whose version it changes, by
 // comparing manifests before and after it: each package.json and the catalogs
-// in pnpm-workspace.yaml, .yarnrc.yml and the root package.json. Pure functions over file contents, so the tests need
-// neither git nor a registry.
+// in pnpm-workspace.yaml, .yarnrc.yml and the root package.json. Pure
+// functions over file contents, so the tests need neither git nor a registry.
 
 import { posix } from "node:path";
 import { parse } from "yaml";

@@ -63,8 +63,22 @@ describe("bunCooldown", () => {
     });
   });
 
+  it("takes each setting from the project's bunfig.toml, else the global one", () => {
+    const global = '[install]\nminimumReleaseAge = 86400\nminimumReleaseAgeExcludes = ["foo"]\n';
+    assert.deepEqual(bunCooldown("[install]\nexact = true\n", global), {
+      minutes: 1440,
+      exclude: ["foo"],
+    });
+    assert.deepEqual(bunCooldown("[install]\nminimumReleaseAge = 0\n", global), {
+      minutes: 0,
+      exclude: ["foo"],
+    });
+    assert.deepEqual(bunCooldown(undefined, global), { minutes: 1440, exclude: ["foo"] });
+  });
+
   it("is undefined without a file or setting", () => {
     assert.equal(bunCooldown(undefined), undefined);
+    assert.equal(bunCooldown(undefined, undefined), undefined);
     assert.equal(bunCooldown(""), undefined);
     assert.equal(bunCooldown('[install]\nregistry = "https://example.invalid/"\n'), undefined);
   });

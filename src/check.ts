@@ -4,7 +4,8 @@
 // package.json). Dependencies the change leaves alone aren't checked: keeping
 // those current is a job for Dependabot or Renovate.
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, posix } from "node:path";
 import { CONFIG_FILE, parseConfig, type Config } from "./config.ts";
 import { atRevision, inWorkingTree, packageDirectories } from "./git.ts";
@@ -19,7 +20,12 @@ import {
   type Specs,
 } from "./manifests.ts";
 import { newerReleases, type NcuOptions, type NcuQuery, type Upgrades } from "./ncu.ts";
-import { bunCooldown, detectPackageManager, MARKER_FILES } from "./packageManager.ts";
+import {
+  bunCooldown,
+  detectPackageManager,
+  MARKER_FILES,
+  type Cooldown,
+} from "./packageManager.ts";
 
 const byName = (a: { name: string }, b: { name: string }): number => (a.name < b.name ? -1 : 1);
 
@@ -106,6 +112,19 @@ function parsing<T>(where: string, parse: () => T): T {
   }
 }
 
+/**
+ * Bun's cooldown in the project: its bunfig.toml's settings, else the global
+ * bunfig.toml's ($XDG_CONFIG_HOME/.bunfig.toml, else ~/.bunfig.toml), else
+ * none.
+ */
+function bunCooldownAt(root: string): Cooldown {
+  const global = join(process.env["XDG_CONFIG_HOME"] || homedir(), ".bunfig.toml");
+  const globalText = existsSync(global) ? readFileSync(global, "utf8") : undefined;
+  const where = globalText === undefined ? BUNFIG : `${BUNFIG} or ${global}`;
+  const cooldown = parsing(where, () => bunCooldown(inWorkingTree(root, BUNFIG), globalText));
+  return cooldown ?? { minutes: 0, exclude: [] };
+}
+
 function outdatedIn(
   place: Place,
   current: Specs,
@@ -184,9 +203,10 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
   }
   const present = new Set(MARKER_FILES.filter((file) => existsSync(join(root, file))));
   const packageManager = parsing("package.json", () => detectPackageManager(rootManifest, present));
-  // npm-check-updates reads the others' cooldowns itself, but not Bun's.
-  const cooldown =
-    packageManager === "bun" ? parsing(BUNFIG, () => bunCooldown(now(BUNFIG))) : undefined;
+  // npm-check-updates reads the others' cooldowns itself, but not Bun's. It's
+  // passed even when unset: given none, npm-check-updates would take npm's
+  // min-release-age from .npmrc, which Bun doesn't read.
+  const cooldown = packageManager === "bun" ? bunCooldownAt(root) : undefined;
   const ncu: NcuOptions = { root, packageManager, ...(cooldown === undefined ? {} : { cooldown }) };
   const patterns = parsing(`the workspace packages in package.json or ${PNPM_WORKSPACE}`, () =>
     workspacePatterns(rootManifest, workspace),

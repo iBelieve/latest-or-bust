@@ -70,10 +70,13 @@ function report(result: CheckResult): boolean {
   }
   if (result.outdated.length === 0) {
     if (result.notFound.length > 0) return false;
-    const unchecked = result.exempted.filter((exempted) => exempted.allow === undefined).length;
-    const total = [...result.checked.values()].reduce((sum, names) => sum + names.length, 0);
+    // By name: one can be exempted in several catalogs of a file it's listed once for.
+    const unchecked = new Set(
+      result.exempted.filter((exempted) => exempted.allow === undefined).map(({ name }) => name),
+    );
+    const all = [...result.checked.values()].every((names) => names.every((n) => unchecked.has(n)));
     console.log(
-      unchecked >= total
+      all
         ? `\nNothing to check: ${CONFIG_FILE} exempts all of them.`
         : "\nAll of them are the newest release.",
     );
