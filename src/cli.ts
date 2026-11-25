@@ -15,7 +15,9 @@ Fails if a dependency that the working tree adds, or changes the version of,
 since the base revision isn't the newest release npm-check-updates finds
 (after the package manager's release-age cooldown, such as pnpm's
 minimumReleaseAge, a day by default since pnpm 11). Checks the root
-package.json, every workspace package's, and pnpm-workspace.yaml's catalogs.
+package.json, every workspace package's, and the catalogs in
+pnpm-workspace.yaml, .yarnrc.yml or (Bun's) package.json. Works with npm,
+pnpm, Yarn and Bun.
 
 The base defaults to where HEAD branched from origin's default branch. On
 GitHub Actions, it's the pull request's base on a pull_request run, and any
@@ -101,15 +103,14 @@ function report(result: CheckResult): boolean {
     return false;
   }
   if (result.notFound.length > 0) return false;
-  // By file and name: one can be in more than one section or catalog of a file.
+  // By name, as exemptions are: one can be in more than one section or
+  // catalog of a file, or in package.json's dependencies and its catalogs.
   const unchecked = new Set(
-    result.exempted
-      .filter((exempted) => exempted.allow === undefined)
-      .map(({ file, name }) => `${file}\0${name}`),
+    result.exempted.filter((exempted) => exempted.allow === undefined).map(({ name }) => name),
   );
-  const total = [...result.checked.values()].reduce((sum, names) => sum + names.length, 0);
+  const all = [...result.checked.values()].every((names) => names.every((n) => unchecked.has(n)));
   console.log(
-    unchecked.size >= total
+    all
       ? `\nNothing to check: ${CONFIG_FILE} exempts all of them.`
       : "\nAll of them are the newest release.",
   );

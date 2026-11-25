@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   catalogSpecs,
+  manifestCatalogSpecs,
   changedEntries,
   changedNames,
   manifestSpecs,
@@ -80,6 +81,34 @@ describe("catalogSpecs", () => {
     assert.equal(catalogSpecs(undefined).size, 0);
     assert.equal(catalogSpecs("packages:\n  - web\n").size, 0);
     assert.equal(catalogSpecs("just a string").size, 0);
+  });
+});
+
+describe("manifestCatalogSpecs", () => {
+  it("reads Bun's catalogs, at the top level or in workspaces", () => {
+    assert.deepEqual(
+      manifestCatalogSpecs(
+        JSON.stringify({
+          catalog: { react: "^19.0.0" },
+          workspaces: {
+            packages: ["web"],
+            catalog: { typescript: "7.0.2" },
+            catalogs: { legacy: { "@types/node": "^22.0.0" } },
+          },
+          dependencies: { left: "1.0.0" },
+        }),
+      ),
+      new Map([
+        ["react", "^19.0.0"],
+        ["typescript", "7.0.2"],
+        ["legacy:@types/node", "^22.0.0"],
+      ]),
+    );
+  });
+
+  it("is empty without a file or catalog", () => {
+    assert.equal(manifestCatalogSpecs(undefined).size, 0);
+    assert.equal(manifestCatalogSpecs('{"workspaces": ["web"]}').size, 0);
   });
 });
 

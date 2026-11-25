@@ -5,6 +5,13 @@ it's below 1.0, a minor version may change behaviour.
 
 ## Unreleased
 
+- Yarn and Bun projects. The package manager is the one `package.json`'s `packageManager` names,
+  else the one whose lockfile, else config file (a `bunfig.toml` only with an `[install]` table), is
+  at the root, so a project that names pnpm only in `packageManager` now counts as pnpm too.
+- Checks Yarn's catalogs in `.yarnrc.yml` and Bun's in the root `package.json`.
+- Honors Yarn's `npmMinimalAgeGate` (with `npmPreapprovedPackages`, in the root `.yarnrc.yml` or
+  `~/.yarnrc.yml`, with or without `yarn.lock`) and Bun's `minimumReleaseAge` (with
+  `minimumReleaseAgeExcludes`, in `bunfig.toml` or the global `.bunfig.toml`).
 - A dependency in more than one of `dependencies`, `devDependencies` and `optionalDependencies` is
   checked in each section, by its spec there. Before, only one section's spec was compared, so a
   change to the other could go unnoticed. The report names the section for such a dependency. A
@@ -12,8 +19,8 @@ it's below 1.0, a minor version may change behaviour.
 - pnpm 11 and later's default `minimumReleaseAge` of a day applies when nothing sets one, so the
   check no longer asks for a release pnpm won't install yet. `minimumReleaseAgeExclude` still
   applies, and so does `PNPM_CONFIG_MINIMUM_RELEASE_AGE` on pnpm 11 and later.
-- "Nothing to check" is no longer printed when a dependency exempt in two sections or catalogs of a
-  file hides one that was checked.
+- "Nothing to check" is no longer printed when a dependency exempt in two sections or catalogs
+  hides one that was checked.
 - On GitHub Actions, with no base revision, it works out what to compare with: a `pull_request` run
   compares with the pull request's base (fetching that commit into a shallow clone), and any other
   run, along with pull requests from Dependabot and Renovate, passes with a note that there's nothing

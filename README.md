@@ -24,7 +24,7 @@ Update them, or if one is held back on purpose, exempt it in latest-or-bust.json
 ## Usage
 
 ```sh
-npm install --save-dev latest-or-bust   # or: pnpm add --save-dev latest-or-bust
+npm install --save-dev latest-or-bust   # or pnpm add, yarn add, bun add
 npx latest-or-bust [base revision]
 ```
 
@@ -71,13 +71,14 @@ Outside GitHub Actions, it always compares with the base revision, or where `HEA
 ## What it checks
 
 - The root `package.json` and every workspace package's: the `packages` in `pnpm-workspace.yaml`,
-  and npm's `workspaces` in the root `package.json` (globs and `!` exclusions included). Other
-  `package.json` files, such as test fixtures, are left out.
+  and the `workspaces` in the root `package.json` that npm, Yarn and Bun use (globs and `!`
+  exclusions included). Other `package.json` files, such as test fixtures, are left out.
 - In each, `dependencies`, `devDependencies` and `optionalDependencies`, each on its own, so a
   dependency in more than one is checked in each (and the report names the section).
   `peerDependencies` are left out, since they're deliberately wide ranges rather than what gets
   installed.
-- pnpm's catalogs, default and named, in `pnpm-workspace.yaml`.
+- Catalogs, default and named: pnpm's in `pnpm-workspace.yaml`, Yarn's in `.yarnrc.yml`, and Bun's
+  in the root `package.json` (at the top level or in `workspaces`).
 
 A dependency counts as changed when its version spec changes at all, so a range whose floor isn't the
 newest release fails too (`^1.1.0` when 1.2.0 is out). A dependency moved to another section with
@@ -86,15 +87,19 @@ the same spec hasn't changed. Specs that don't name a registry version
 entries are checked in the catalog.
 
 The newest release comes from [npm-check-updates](https://github.com/raineorshine/npm-check-updates),
-which reads your registry settings from `.npmrc`, and honors the package manager's release-age
-cooldown, so it never asks for a release your package manager won't install yet:
+which reads your registry settings from `.npmrc` (and in a Yarn project, the `npmScopes` in
+`.yarnrc.yml`), and honors the package manager's release-age cooldown, so it never asks for a
+release your package manager won't install yet:
 
 - npm: `min-release-age` in `.npmrc`
 - pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml`, `PNPM_CONFIG_MINIMUM_RELEASE_AGE` or pnpm's
-  global config (a project with `pnpm-workspace.yaml` or `pnpm-lock.yaml` is a pnpm project). pnpm
-  11 and later wait a day when nothing sets it, and so does latest-or-bust, leaving out what
-  `minimumReleaseAgeExclude` names. pnpm's version comes from `packageManager` in `package.json`,
-  else `pnpm --version`.
+  global config. pnpm 11 and later wait a day when nothing sets it, and so does latest-or-bust,
+  leaving out what `minimumReleaseAgeExclude` names. pnpm's version comes from `packageManager` in
+  `package.json`, else `pnpm --version`.
+- Yarn: `npmMinimalAgeGate` in the root `.yarnrc.yml`, or in your home directory, leaving out what
+  `npmPreapprovedPackages` names (Yarn 4.10 and later; Yarn 1 has none)
+- Bun: `minimumReleaseAge` and `minimumReleaseAgeExcludes` in `bunfig.toml`'s `[install]`, or in
+  the global `.bunfig.toml` (in `$XDG_CONFIG_HOME`, else your home directory)
 
 A dependency it can't look up, because it isn't on the registry or the registry is unreachable or
 refuses the login, fails the check too: there's no telling whether it's the newest.
@@ -131,7 +136,17 @@ reason is gone.
 
 ## Package managers
 
-npm and pnpm are supported. Yarn and Bun are planned.
+npm, pnpm, Yarn (1 and 2 and later) and Bun are supported. The package manager is the one the root
+`package.json`'s `packageManager` names, else the one whose lockfile is at the root
+(`pnpm-lock.yaml`, `yarn.lock`, `bun.lock` or `bun.lockb`, `package-lock.json` or
+`npm-shrinkwrap.json`), else the one whose config file is (`pnpm-workspace.yaml`, `.yarnrc.yml`,
+or a `bunfig.toml` with an `[install]` table: one without configures only Bun's runtime or test
+runner), else npm.
+
+Registry settings that only Yarn 2+ or Bun read (`.yarnrc.yml`'s top-level `npmRegistryServer` and
+`npmAuthToken`, `bunfig.toml`'s registries) aren't used: a dependency from such a registry fails as
+one it can't look up. Put the registry in `.npmrc` too (Bun reads it as well), or for Yarn, in
+`npmScopes` (which are only read with `yarn.lock` at the root).
 
 ## Requirements
 
