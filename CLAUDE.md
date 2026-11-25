@@ -13,8 +13,10 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
   package manager's cooldown just as `ncu` does), with a config file of its
   own (`ncurc.mjs`, which reports the packages it could look up, so a failed
   lookup fails the check) and options pinned, so a project's `.ncurc` can't
-  change what it does. `src/check.ts` ties them together; `src/cli.ts` is
-  the command
+  change what it does. `src/packageManager.ts`: which package manager a
+  project uses, and Bun's cooldown from `bunfig.toml` (npm-check-updates
+  reads npm's, pnpm's and Yarn's itself, not Bun's). `src/check.ts` ties
+  them together; `src/cli.ts` is the command
 - latest-or-bust's own config is the interface; npm-check-updates is an
   implementation detail that could be swapped out, so don't expose its
   options
@@ -24,7 +26,9 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
 - Only erasable TypeScript syntax (no enums or parameter properties); import
   with `.ts` extensions (`rewriteRelativeImportExtensions` makes them `.js`
   in `dist/`)
-- npm and pnpm are supported; Yarn and Bun come in later PRs
+- npm, pnpm, Yarn and Bun are supported. The tests don't need Yarn or Bun
+  installed: npm-check-updates only spawns them for options latest-or-bust
+  doesn't use
 
 ## Checks
 

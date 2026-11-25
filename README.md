@@ -24,7 +24,7 @@ Update them, or if one is held back on purpose, exempt it in latest-or-bust.json
 ## Usage
 
 ```sh
-npm install --save-dev latest-or-bust   # or: pnpm add --save-dev latest-or-bust
+npm install --save-dev latest-or-bust   # or pnpm add, yarn add, bun add
 npx latest-or-bust [base revision]
 ```
 
@@ -60,11 +60,12 @@ jobs:
 ## What it checks
 
 - The root `package.json` and every workspace package's: the `packages` in `pnpm-workspace.yaml`,
-  and npm's `workspaces` in the root `package.json` (globs and `!` exclusions included). Other
-  `package.json` files, such as test fixtures, are left out.
+  and the `workspaces` in the root `package.json` that npm, Yarn and Bun use (globs and `!`
+  exclusions included). Other `package.json` files, such as test fixtures, are left out.
 - In each, `dependencies`, `devDependencies` and `optionalDependencies`. `peerDependencies` are left
   out, since they're deliberately wide ranges rather than what gets installed.
-- pnpm's catalogs, default and named, in `pnpm-workspace.yaml`.
+- Catalogs, default and named: pnpm's in `pnpm-workspace.yaml`, Yarn's in `.yarnrc.yml`, and Bun's
+  in the root `package.json` (at the top level or in `workspaces`).
 
 A dependency counts as changed when its version spec changes at all, so a range whose floor isn't the
 newest release fails too (`^1.1.0` when 1.2.0 is out). Specs that don't name a registry version
@@ -72,12 +73,15 @@ newest release fails too (`^1.1.0` when 1.2.0 is out). Specs that don't name a r
 entries are checked in the catalog.
 
 The newest release comes from [npm-check-updates](https://github.com/raineorshine/npm-check-updates),
-which reads your registry settings from `.npmrc`, and honors the package manager's release-age
-cooldown, so it never asks for a release your package manager won't install yet:
+which reads your registry settings from `.npmrc` (and in a Yarn project, the `npmScopes` in
+`.yarnrc.yml`), and honors the package manager's release-age cooldown, so it never asks for a
+release your package manager won't install yet:
 
 - npm: `min-release-age` in `.npmrc`
-- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` (a project with `pnpm-workspace.yaml` or
-  `pnpm-lock.yaml` is a pnpm project)
+- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml`
+- Yarn: `npmMinimalAgeGate` in the `.yarnrc.yml` next to `yarn.lock`, or in your home directory
+  (Yarn 4.10 and later; Yarn 1 has none)
+- Bun: `minimumReleaseAge` and `minimumReleaseAgeExcludes` in `bunfig.toml`'s `[install]`
 
 A dependency it can't look up, because it isn't on the registry or the registry is unreachable or
 refuses the login, fails the check too: there's no telling whether it's the newest.
@@ -114,7 +118,15 @@ reason is gone.
 
 ## Package managers
 
-npm and pnpm are supported. Yarn and Bun are planned.
+npm, pnpm, Yarn (1 and 2 and later) and Bun are supported. The package manager is the one the root
+`package.json`'s `packageManager` names, else the one whose lockfile is at the root
+(`pnpm-lock.yaml`, `yarn.lock`, `bun.lock` or `bun.lockb`, `package-lock.json`), else the one whose
+config file is (`pnpm-workspace.yaml`, `.yarnrc.yml`, `bunfig.toml`), else npm.
+
+Registry settings that only Yarn 2+ or Bun read (`.yarnrc.yml`'s top-level `npmRegistryServer` and
+`npmAuthToken`, `bunfig.toml`'s registries) aren't used: a dependency from such a registry fails as
+one it can't look up. Put the registry in `.npmrc` too (Bun reads it as well), or for Yarn, in
+`npmScopes`.
 
 ## Requirements
 

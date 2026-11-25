@@ -1,7 +1,8 @@
 // Asks npm-check-updates for the newest release of some dependencies. It's
 // run as its own command line, not through its module API, so it reads the
 // registry settings (.npmrc) and the package manager's release-age cooldown
-// (npm's min-release-age, pnpm's minimumReleaseAge) just as `ncu` does. It's
+// (npm's min-release-age, pnpm's minimumReleaseAge, Yarn's
+// npmMinimalAgeGate; Bun's it's given) just as `ncu` does. It's
 // given a config file of its own, so a project's .ncurc can't change
 // what it does: latest-or-bust.json (config.ts) is latest-or-bust's config.
 // That config file, ncurc.mjs, also reports which packages it could look up.
@@ -13,6 +14,7 @@ import { Readable } from "node:stream";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRecord, type Specs } from "./manifests.ts";
+import type { Cooldown, PackageManager } from "./packageManager.ts";
 
 /** Dependency name to the version spec npm-check-updates would upgrade it to. */
 export type Upgrades = Map<string, string>;
@@ -38,8 +40,13 @@ function ncuCli(): string {
 export interface NcuOptions {
   /** The repository root, where npm-check-updates runs. */
   root: string;
-  /** "pnpm" to say it's a pnpm project; otherwise npm-check-updates works it out. */
-  packageManager?: "pnpm";
+  /** The project's package manager, whose registry and cooldown settings npm-check-updates reads. */
+  packageManager: PackageManager;
+  /**
+   * The package manager's cooldown, for one whose setting npm-check-updates
+   * doesn't read itself (Bun's).
+   */
+  cooldown?: Cooldown;
 }
 
 /** What to ask about: dependencies of a package.json, or of a package's data. */
@@ -145,6 +152,20 @@ function upgradesOf(value: unknown): Upgrades {
   return upgrades;
 }
 
+/**
+ * The names to ask about together, each group with the options that give it
+ * its cooldown: all of them with npm-check-updates' own reading of the
+ * package manager's, unless `cooldown` says otherwise.
+ */
+function withCooldown(names: string[], cooldown: Cooldown | undefined): [string[], string[]][] {
+  if (cooldown === undefined) return [[names, []]];
+  const exclude = new Set(cooldown.exclude);
+  return [
+    [names.filter((name) => !exclude.has(name)), ["--cooldown", `${cooldown.minutes}m`]],
+    [names.filter((name) => exclude.has(name)), ["--cooldown", "0"]],
+  ];
+}
+
 /** Which of the named dependencies have a newer release (on their major, for target "minor"), and which have none at all. */
 export async function newerReleases(options: NcuOptions, query: NcuQuery): Promise<Releases> {
   if (query.names.length === 0) return { upgrades: new Map(), notFound: [] };
@@ -158,7 +179,8 @@ export async function newerReleases(options: NcuOptions, query: NcuQuery): Promi
   const ask = (names: string[], extra: string[] = []): Promise<Output> =>
     ncuOutput(options, [
       ...source,
-      ...(options.packageManager === undefined ? [] : ["--packageManager", options.packageManager]),
+      "--packageManager",
+      options.packageManager,
       // The sections latest-or-bust compares.
       "--dep",
       "prod,dev,optional",
@@ -168,9 +190,16 @@ export async function newerReleases(options: NcuOptions, query: NcuQuery): Promi
       names.join(","),
       ...extra,
     ]);
-  const { stdout, found } = await ask(query.names);
-  const upgrades = upgradesOf(parseJson("What npm-check-updates printed", stdout));
-  const seen = foundNames(found);
+  const upgrades: Upgrades = new Map();
+  const seen = new Set<string>();
+  for (const [names, extra] of withCooldown(query.names, options.cooldown)) {
+    if (names.length === 0) continue;
+    const { stdout, found } = await ask(names, extra);
+    for (const [name, spec] of upgradesOf(parseJson("What npm-check-updates printed", stdout))) {
+      upgrades.set(name, spec);
+    }
+    for (const name of foundNames(found)) seen.add(name);
+  }
   let missing = query.names.filter((name) => !seen.has(name));
   if (missing.length > 0) {
     // filterResults isn't called either for a package whose newer releases

@@ -5,6 +5,12 @@ it's below 1.0, a minor version may change behaviour.
 
 ## Unreleased
 
+- Yarn and Bun projects: the package manager is the one `package.json`'s `packageManager` names, else
+  the one whose lockfile, else config file, is at the root.
+- Checks Yarn's catalogs in `.yarnrc.yml` and Bun's in the root `package.json`.
+- Honors Yarn's `npmMinimalAgeGate` and Bun's `minimumReleaseAge` (with
+  `minimumReleaseAgeExcludes`).
+
 ## 0.1.0
 
 The first release: the new-dependency check from iBelieve/ehymnboard, as a package.

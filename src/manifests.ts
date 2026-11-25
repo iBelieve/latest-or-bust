@@ -1,6 +1,6 @@
 // Finds the dependencies a change adds, or whose version it changes, by
 // comparing manifests before and after it: each package.json and the catalogs
-// in pnpm-workspace.yaml. Pure functions over file contents, so the tests need
+// in pnpm-workspace.yaml, .yarnrc.yml and the root package.json. Pure functions over file contents, so the tests need
 // neither git nor a registry.
 
 import { posix } from "node:path";
@@ -24,7 +24,8 @@ function addStrings(specs: Specs, section: unknown, prefix = ""): void {
   }
 }
 
-function parseManifest(text: string | undefined): Record<string, unknown> {
+/** A package.json's top-level object; empty when the file doesn't exist. */
+export function parseManifest(text: string | undefined): Record<string, unknown> {
   if (text === undefined) return {};
   const manifest: unknown = JSON.parse(text);
   return isRecord(manifest) ? manifest : {};
@@ -44,21 +45,41 @@ export function manifestSpecs(text: string | undefined): Specs {
   return specs;
 }
 
-/**
- * The version specs in pnpm-workspace.yaml's default catalog and named
- * catalogs. The default catalog's are keyed by name, a named catalog's by
- * "catalog:name", so a change to any of them counts.
- */
-export function catalogSpecs(text: string | undefined): Specs {
-  const workspace = parseWorkspace(text);
-  const specs: Specs = new Map();
-  addStrings(specs, workspace["catalog"]);
-  const named = workspace["catalogs"];
+// Adds the entries of a default `catalog` and named `catalogs`: the default
+// catalog's keyed by name, a named catalog's by "name:package", so a change to
+// any of them counts.
+function addCatalogs(specs: Specs, source: unknown): void {
+  if (!isRecord(source)) return;
+  addStrings(specs, source["catalog"]);
+  const named = source["catalogs"];
   if (isRecord(named)) {
     for (const [catalog, entries] of Object.entries(named)) {
       addStrings(specs, entries, `${catalog}:`);
     }
   }
+}
+
+/**
+ * The version specs in a YAML file's default catalog (`catalog`) and named
+ * catalogs (`catalogs`): pnpm's pnpm-workspace.yaml or Yarn's .yarnrc.yml.
+ * The default catalog's are keyed by name, a named catalog's by
+ * "catalog:name", so a change to any of them counts.
+ */
+export function catalogSpecs(text: string | undefined): Specs {
+  const specs: Specs = new Map();
+  addCatalogs(specs, parseWorkspace(text));
+  return specs;
+}
+
+/**
+ * The version specs in a package.json's catalogs, where Bun keeps them: at
+ * the top level, or in the `workspaces` object. Keyed as catalogSpecs's are.
+ */
+export function manifestCatalogSpecs(text: string | undefined): Specs {
+  const manifest = parseManifest(text);
+  const specs: Specs = new Map();
+  addCatalogs(specs, manifest);
+  addCatalogs(specs, manifest["workspaces"]);
   return specs;
 }
 

@@ -14,7 +14,8 @@ Fails if a dependency that the working tree adds, or changes the version of,
 since the base revision isn't the newest release npm-check-updates finds
 (after the package manager's release-age cooldown, such as pnpm's
 minimumReleaseAge). Checks the root package.json, every workspace package's,
-and pnpm-workspace.yaml's catalogs.
+and the catalogs in pnpm-workspace.yaml, .yarnrc.yml or (Bun's) package.json.
+Works with npm, pnpm, Yarn and Bun.
 
 The base defaults to where HEAD branched from origin's default branch. On a
 GitHub pull_request run, pass HEAD^ (with actions/checkout's fetch-depth: 2).

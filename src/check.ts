@@ -1,31 +1,52 @@
 // Checks that every dependency a change adds, or changes the version of, is
 // the newest release: in the root package.json, each workspace package's, and
-// pnpm-workspace.yaml's catalogs. Dependencies the change leaves alone aren't
-// checked: keeping those current is a job for Dependabot or Renovate.
+// the catalogs (pnpm-workspace.yaml's, .yarnrc.yml's and Bun's in the root
+// package.json). Dependencies the change leaves alone aren't checked: keeping
+// those current is a job for Dependabot or Renovate.
 
-import { posix } from "node:path";
+import { existsSync } from "node:fs";
+import { join, posix } from "node:path";
 import { CONFIG_FILE, parseConfig, type Config } from "./config.ts";
 import { atRevision, inWorkingTree, packageDirectories } from "./git.ts";
 import {
   catalogSpecs,
   changedEntries,
   changedNames,
+  manifestCatalogSpecs,
   manifestSpecs,
   matchWorkspaces,
   workspacePatterns,
   type Specs,
 } from "./manifests.ts";
 import { newerReleases, type NcuOptions, type NcuQuery, type Upgrades } from "./ncu.ts";
+import { bunCooldown, detectPackageManager, MARKER_FILES } from "./packageManager.ts";
 
 const byName = (a: { name: string }, b: { name: string }): number => (a.name < b.name ? -1 : 1);
 
 const PNPM_WORKSPACE = "pnpm-workspace.yaml";
+const BUNFIG = "bunfig.toml";
 
-/** Where a dependency is: a file, and for a named pnpm catalog, the catalog. */
+/**
+ * Where catalogs are defined, by file: pnpm's and Yarn's own files, and
+ * Bun's root package.json. Each is checked whichever the package manager,
+ * since only the one it reads would have catalogs.
+ */
+const CATALOGS: [file: string, specs: (text: string | undefined) => Specs][] = [
+  [PNPM_WORKSPACE, catalogSpecs],
+  [".yarnrc.yml", catalogSpecs],
+  ["package.json", manifestCatalogSpecs],
+];
+
+/** Where a dependency is: a file, and for a catalog entry, the catalog when the file doesn't say. */
 export interface Place {
   /** The file it's in, relative to the root. */
   file: string;
-  /** The named catalog in pnpm-workspace.yaml it's in; undefined elsewhere. */
+  /**
+   * The catalog it's in: a named catalog's name, or "default" for the
+   * default catalog in package.json (pnpm-workspace.yaml's and
+   * .yarnrc.yml's default catalog leave it undefined). Undefined for a
+   * package's own dependencies.
+   */
   catalog?: string;
 }
 
@@ -53,7 +74,10 @@ export interface NotFound extends Place {
 }
 
 export interface CheckResult {
-  /** Each file with added or changed dependencies, with their names (exempt ones too). */
+  /**
+   * Each file with added or changed dependencies, with their names (exempt
+   * ones too); "package.json catalogs" for the root package.json's catalogs.
+   */
   checked: Map<string, string[]>;
   /** The added or changed dependencies latest-or-bust.json exempts. */
   exempted: Exempted[];
@@ -158,10 +182,12 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
       `There's no package.json or ${PNPM_WORKSPACE} at the repository root (${root}), or at ${base}: latest-or-bust checks the project there`,
     );
   }
-  // A pnpm project, even without pnpm-lock.yaml (which npm-check-updates
-  // would need to know it), so pnpm's cooldown applies.
-  const isPnpm = workspace !== undefined || now("pnpm-lock.yaml") !== undefined;
-  const ncu: NcuOptions = { root, ...(isPnpm ? { packageManager: "pnpm" } : {}) };
+  const present = new Set(MARKER_FILES.filter((file) => existsSync(join(root, file))));
+  const packageManager = parsing("package.json", () => detectPackageManager(rootManifest, present));
+  // npm-check-updates reads the others' cooldowns itself, but not Bun's.
+  const cooldown =
+    packageManager === "bun" ? parsing(BUNFIG, () => bunCooldown(now(BUNFIG))) : undefined;
+  const ncu: NcuOptions = { root, packageManager, ...(cooldown === undefined ? {} : { cooldown }) };
   const patterns = parsing(`the workspace packages in package.json or ${PNPM_WORKSPACE}`, () =>
     workspacePatterns(rootManifest, workspace),
   );
@@ -179,17 +205,19 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
     await checkFile(ncu, config, result, { file: manifest }, { packageFile: manifest }, changed);
   }
 
-  const catalog = parsing(PNPM_WORKSPACE, () => catalogSpecs(workspace));
-  const previousCatalog = parsing(`${PNPM_WORKSPACE} at ${base}`, () =>
-    catalogSpecs(previousWorkspace),
-  );
-  const catalogNames = changedNames(previousCatalog, catalog);
-  if (catalogNames.length > 0) {
-    result.checked.set(PNPM_WORKSPACE, catalogNames);
+  for (const [file, specs] of CATALOGS) {
+    const catalog = parsing(file, () => specs(now(file)));
+    const previousCatalog = parsing(`${file} at ${base}`, () => specs(before(file)));
+    const catalogNames = changedNames(previousCatalog, catalog);
+    if (catalogNames.length === 0) continue;
+    // package.json's own dependencies are listed under its name.
+    const isManifest = file === "package.json";
+    result.checked.set(isManifest ? `${file} catalogs` : file, catalogNames);
     // Each catalog on its own, so each entry is judged by its own spec.
     for (const [named, entries] of changedEntries(previousCatalog, catalog)) {
       // The default catalog's name is "".
-      const place: Place = { file: PNPM_WORKSPACE, ...(named === "" ? {} : { catalog: named }) };
+      const name = named === "" && isManifest ? "default" : named;
+      const place: Place = { file, ...(name === "" ? {} : { catalog: name }) };
       await checkFile(ncu, config, result, place, { dependencies: entries }, entries);
     }
   }
