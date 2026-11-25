@@ -205,40 +205,36 @@ describe("changedNames", () => {
   });
 });
 
+/** A section's string entries. */
+const strings = (entries: Record<string, unknown> | undefined): Specs =>
+  new Map(
+    Object.entries(entries ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+
 describe("manifestSpecs", () => {
-  it("reads back every string spec in the installed sections, and nothing else", () => {
+  it("reads back each installed section's string specs, and nothing else", () => {
+    // A section's entry is a spec, or anything else JSON allows, which isn't one.
+    const section = fc.dictionary(packageName, fc.oneof(spec, fc.jsonValue()), { maxKeys: 6 });
     fc.assert(
       fc.property(
-        // Distinct names across the sections, so none overrides another.
-        fc.uniqueArray(
-          fc.tuple(
-            packageName,
-            spec,
-            fc.constantFrom(
-              "dependencies",
-              "devDependencies",
-              "optionalDependencies",
-              "peerDependencies",
-            ),
-          ),
+        fc.record(
           {
-            selector: ([name]) => name,
-            maxLength: 12,
+            dependencies: section,
+            devDependencies: section,
+            optionalDependencies: section,
+            peerDependencies: section,
           },
+          { requiredKeys: [] },
         ),
         fc.dictionary(word, fc.jsonValue(), { maxKeys: 3 }),
-        (entries, other) => {
-          const manifest: Record<string, Record<string, unknown>> = {};
-          for (const [name, value, section] of entries) {
-            manifest[section] = { ...manifest[section], [name]: value };
-          }
-          const expected = entries
-            .filter(([, , section]) => section !== "peerDependencies")
-            .map(([name, value]): [string, string] => [name, value]);
-          assert.deepEqual(
-            [...manifestSpecs(JSON.stringify({ ...other, ...manifest }))].toSorted(byKey),
-            expected.toSorted(byKey),
-          );
+        (sections, other) => {
+          assert.deepEqual(manifestSpecs(JSON.stringify({ ...other, ...sections })), {
+            dependencies: strings(sections.dependencies),
+            devDependencies: strings(sections.devDependencies),
+            optionalDependencies: strings(sections.optionalDependencies),
+          });
         },
       ),
     );
@@ -247,7 +243,9 @@ describe("manifestSpecs", () => {
   it("reads any JSON without throwing", () => {
     fc.assert(
       fc.property(fc.json(), (text) => {
-        for (const value of manifestSpecs(text).values()) assert.equal(typeof value, "string");
+        for (const section of Object.values(manifestSpecs(text))) {
+          for (const value of section.values()) assert.equal(typeof value, "string");
+        }
       }),
     );
   });

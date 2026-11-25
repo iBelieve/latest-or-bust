@@ -13,8 +13,12 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
   package manager's cooldown just as `ncu` does), with a config file of its
   own (`ncurc.mjs`, which reports the packages it could look up, so a failed
   lookup fails the check) and options pinned, so a project's `.ncurc` can't
-  change what it does. `src/check.ts` ties them together; `src/cli.ts` is
-  the command
+  change what it does. `src/pnpm.ts`: pnpm 11+'s default `minimumReleaseAge`,
+  which npm-check-updates only applies when it's set, given to it as a copy
+  of pnpm's global config. `src/check.ts` ties them together, asking about
+  each package.json section on its own; `src/cli.ts` is the command
+- `src/github.ts`: on GitHub Actions, the base when none is passed (a pull
+  request's), or that the run has nothing to check
 - latest-or-bust's own config is the interface; npm-check-updates is an
   implementation detail that could be swapped out, so don't expose its
   options
@@ -64,8 +68,9 @@ needs a line in its `needs`.
   with npm in a throwaway directory and runs the installed command against
   the real registry, which must pass a dependency at its newest release and
   fail an old one
-- On pull requests, `node dist/cli.js HEAD^`: latest-or-bust checks its own
-  dependencies, so add a dependency at its newest release
+- `node dist/cli.js`: latest-or-bust checks its own dependencies (against a
+  pull request's base; other runs pass), so add a dependency at its newest
+  release
 - actionlint over the workflows, shellcheck over `scripts/*.sh`, and
   [zizmor](https://docs.zizmor.sh) (`pipx run zizmor .github/workflows`)
   for workflow security. Actions are pinned to a commit with the version in

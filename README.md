@@ -34,40 +34,54 @@ a dependency added or changed since then isn't the newest release, and 0 otherwi
 
 ### In GitHub Actions
 
-On a `pull_request` run, `actions/checkout` checks out the merge of the pull request into its base,
-so `HEAD^` is the base:
+Run it with no arguments in a workflow that runs on pull requests, and it works out what to compare
+with on its own:
 
 ```yaml
-on: pull_request
+on: [push, pull_request]
 
 jobs:
   dependencies:
     runs-on: ubuntu-latest
-    # Optional: Dependabot's grouped minor-and-patch PRs don't move a dependency
-    # to a new major version even when one is out, so they'd fail this.
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
-      - run: npx latest-or-bust HEAD^
+      - run: npx latest-or-bust
 ```
+
+- On a `pull_request` run, it compares with the pull request's base. `actions/checkout` checks out
+  the merge of the pull request into its base, so that's the merge's first parent; in a shallow
+  clone (the default), latest-or-bust fetches that one commit. If you check out the pull request's
+  own head instead, it compares with where that branched from the base, which needs the history
+  (`fetch-depth: 0`).
+- Any other run, such as a push to the default branch, a schedule or a merge queue, passes with a
+  note that there's nothing to check: there's no change to compare, and the pull request was
+  checked when it was open. So the same workflow can run on pushes and pull requests.
+- Pull requests from Dependabot and Renovate pass too. Their grouped minor-and-patch pull requests
+  don't move a dependency to a new major version even when one is out, so they'd fail the check for
+  doing what they're set up to do.
+
+Pass a base revision to skip all of this and compare with it (`npx latest-or-bust origin/main`).
+Outside GitHub Actions, it always compares with the base revision, or where `HEAD` branched from
+`origin`.
 
 ## What it checks
 
 - The root `package.json` and every workspace package's: the `packages` in `pnpm-workspace.yaml`,
   and npm's `workspaces` in the root `package.json` (globs and `!` exclusions included). Other
   `package.json` files, such as test fixtures, are left out.
-- In each, `dependencies`, `devDependencies` and `optionalDependencies`. `peerDependencies` are left
-  out, since they're deliberately wide ranges rather than what gets installed.
+- In each, `dependencies`, `devDependencies` and `optionalDependencies`, each on its own, so a
+  dependency in more than one is checked in each (and the report names the section).
+  `peerDependencies` are left out, since they're deliberately wide ranges rather than what gets
+  installed.
 - pnpm's catalogs, default and named, in `pnpm-workspace.yaml`.
 
 A dependency counts as changed when its version spec changes at all, so a range whose floor isn't the
-newest release fails too (`^1.1.0` when 1.2.0 is out). Specs that don't name a registry version
+newest release fails too (`^1.1.0` when 1.2.0 is out). A dependency moved to another section with
+the same spec hasn't changed. Specs that don't name a registry version
 (`workspace:`, `catalog:`, `file:`, `link:`, `npm:` aliases, git URLs) are skipped; a catalog's
 entries are checked in the catalog.
 
@@ -76,8 +90,11 @@ which reads your registry settings from `.npmrc`, and honors the package manager
 cooldown, so it never asks for a release your package manager won't install yet:
 
 - npm: `min-release-age` in `.npmrc`
-- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` (a project with `pnpm-workspace.yaml` or
-  `pnpm-lock.yaml` is a pnpm project)
+- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml`, `PNPM_CONFIG_MINIMUM_RELEASE_AGE` or pnpm's
+  global config (a project with `pnpm-workspace.yaml` or `pnpm-lock.yaml` is a pnpm project). pnpm
+  11 and later wait a day when nothing sets it, and so does latest-or-bust, leaving out what
+  `minimumReleaseAgeExclude` names. pnpm's version comes from `packageManager` in `package.json`,
+  else `pnpm --version`.
 
 A dependency it can't look up, because it isn't on the registry or the registry is unreachable or
 refuses the login, fails the check too: there's no telling whether it's the newest.
