@@ -250,9 +250,13 @@ async function checkManifest(
   for (const section of MANIFEST_SECTIONS) {
     const changed = changedEntries(previous[section], current[section]).get("");
     if (changed === undefined) continue;
-    // Moved from another section with the same spec: its version didn't change.
+    // Moved from another section with the same spec: its version didn't
+    // change. Not if it was already in this one, where its spec did.
     for (const [name, spec] of changed) {
-      if (MANIFEST_SECTIONS.some((other) => previous[other].get(name) === spec)) {
+      if (
+        !previous[section].has(name) &&
+        MANIFEST_SECTIONS.some((other) => previous[other].get(name) === spec)
+      ) {
         changed.delete(name);
       }
     }

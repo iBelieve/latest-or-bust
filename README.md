@@ -58,7 +58,9 @@ jobs:
 
 - On a `pull_request` run, it compares with the pull request's base. `actions/checkout` checks out
   the merge of the pull request into its base, so that's the merge's first parent; in a shallow
-  clone (the default), latest-or-bust fetches that one commit. If you check out the pull request's
+  clone (the default), latest-or-bust fetches that one commit. In a private repository checked out
+  with `persist-credentials: false`, that fetch has no credentials, so check out with
+  `fetch-depth: 2` instead. If you check out the pull request's
   own head instead, it compares with where that branched from the base, which needs the history
   (`fetch-depth: 0`).
 - Any other run, such as a push to the default branch, a schedule or a merge queue, passes with a

@@ -320,6 +320,18 @@ describe("check", () => {
     assert.deepEqual(result.outdated, []);
   });
 
+  it("checks a change to another section's spec, not taking it for a move", async () => {
+    npmProject({ dependencies: { foo: "^1.2.0" }, optionalDependencies: { foo: "^1.0.0" } });
+    const base = repo.commit();
+    npmProject({ dependencies: { foo: "^1.0.0" }, optionalDependencies: { foo: "^1.0.0" } });
+    assert.deepEqual(
+      (await run(base)).outdated.map(
+        ({ section, spec, latest }) => `${String(section)} ${spec} → ${latest}`,
+      ),
+      ["dependencies ^1.0.0 → ^1.2.0"],
+    );
+  });
+
   it("checks a name added to a second section, by the spec there", async () => {
     npmProject({ dependencies: { foo: "1.2.0" } });
     const base = repo.commit();
