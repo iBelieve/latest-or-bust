@@ -8,6 +8,10 @@ request from adding a new dependency at an old version, or from upgrading one on
 adds, or changes the version of, and fails if any of them isn't the newest release. Dependencies the
 change leaves alone aren't checked, so it never fails a pull request for something it didn't touch.
 
+It's built on [npm-check-updates](https://github.com/raineorshine/npm-check-updates), which does
+the work of finding each dependency's newest release: latest-or-bust works out what a change touched
+and asks npm-check-updates about just those.
+
 ```console
 $ npx latest-or-bust
 Checking dependencies added or changed since 3c23f15…
@@ -159,6 +163,14 @@ duplication), `pnpm test` (including fast-check property tests), `pnpm run test:
 `pnpm run health` (complexity and CRAP scores), `pnpm run mutation --base origin/master` (mutation
 testing of what a branch changes), `pnpm run smoke` (the packed package, against the real registry)
 and `pnpm run format:check`. CI runs all of them; `CLAUDE.md` says what each one checks.
+
+## Acknowledgments
+
+latest-or-bust depends on [npm-check-updates](https://github.com/raineorshine/npm-check-updates),
+created by Tomas Junnonen and maintained by [Raine Revere](https://github.com/raineorshine) and its
+contributors, under the Apache License 2.0. It looks up each newest release, with your registry
+settings and release-age cooldown. If latest-or-bust is useful to you, so is npm-check-updates on
+its own: `ncu -u` upgrades all of a project's dependencies at once.
 
 ## License
 
