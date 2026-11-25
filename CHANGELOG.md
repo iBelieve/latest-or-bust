@@ -7,11 +7,14 @@ it's below 1.0, a minor version may change behaviour.
 
 ## 0.2.0
 
-Yarn and Bun support, and no setup needed on GitHub Actions.
+Yarn and Bun support, and no setup needed on GitHub Actions with `actions/checkout`'s defaults.
 
 - Yarn and Bun projects. The package manager is the one `package.json`'s `packageManager` names,
   else the one whose lockfile, else config file (a `bunfig.toml` only with an `[install]` table), is
-  at the root, so a project that names pnpm only in `packageManager` now counts as pnpm too.
+  at the root, so a project that names pnpm only in `packageManager` now counts as pnpm too. The
+  other way round, `pnpm-workspace.yaml` or `pnpm-lock.yaml` no longer makes a project pnpm when
+  `packageManager` names another package manager, and `pnpm-workspace.yaml` doesn't when another
+  one's lockfile is at the root and `pnpm-lock.yaml` isn't.
 - Checks Yarn's catalogs in `.yarnrc.yml` and Bun's in the root `package.json`.
 - Honors Yarn's `npmMinimalAgeGate` (with `npmPreapprovedPackages`, in the root `.yarnrc.yml` or
   `~/.yarnrc.yml`, with or without `yarn.lock`) and Bun's `minimumReleaseAge` (with
@@ -19,7 +22,8 @@ Yarn and Bun support, and no setup needed on GitHub Actions.
 - A dependency in more than one of `dependencies`, `devDependencies` and `optionalDependencies` is
   checked in each section, by its spec there. Before, only one section's spec was compared, so a
   change to the other could go unnoticed. The report names the section for such a dependency. A
-  dependency moved to another section with the same spec still counts as unchanged.
+  dependency moved to another section with the same spec still counts as unchanged, but one
+  changed to the spec it has in another section is checked.
 - pnpm 11 and later's default `minimumReleaseAge` of a day applies when nothing sets one, so the
   check no longer asks for a release pnpm won't install yet. `minimumReleaseAgeExclude` still
   applies, and so does `PNPM_CONFIG_MINIMUM_RELEASE_AGE` on pnpm 11 and later.
@@ -29,7 +33,8 @@ Yarn and Bun support, and no setup needed on GitHub Actions.
   compares with the pull request's base (fetching that commit into a shallow clone), and any other
   run, along with pull requests from Dependabot and Renovate, passes with a note that there's nothing
   to check. A base revision passed on the command line still wins. A workflow no longer needs
-  `fetch-depth: 2`, `HEAD^` or an `if:` on the event.
+  `fetch-depth: 2`, `HEAD^` or an `if:` on the event, except in a private repository checked out
+  with `persist-credentials: false`, where the fetch has no credentials.
 - The README credits npm-check-updates, which latest-or-bust is built on, near the top and in a new
   Acknowledgments section.
 
