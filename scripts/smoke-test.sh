@@ -12,10 +12,11 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# prepack builds dist/.
-tarball="$(cd "$root" && npm pack --silent --pack-destination "$work" | tail -n 1)"
+# prepack builds dist/. --loglevel=error rather than --silent, which would
+# hide npm's error if it failed.
+tarball="$(cd "$root" && npm pack --loglevel=error --pack-destination "$work" | tail -n 1)"
 mkdir "$work/install"
-(cd "$work/install" && npm init -y >/dev/null && npm install --silent --no-audit --no-fund "$work/$tarball")
+(cd "$work/install" && npm init -y >/dev/null && npm install --loglevel=error --no-audit --no-fund "$work/$tarball")
 cli="$work/install/node_modules/.bin/latest-or-bust"
 
 expected="$(node -p 'require(process.argv[1]).version' "$root/package.json")"
@@ -30,7 +31,7 @@ cd "$project"
 git init -q
 commit() {
   git add -A
-  git -c user.name=smoke -c user.email=smoke@example.com commit -qm "$1"
+  git -c user.name=smoke -c user.email=smoke@example.com -c commit.gpgsign=false commit -qm "$1"
 }
 manifest() {
   printf '{ "name": "smoke", "private": true, "dependencies": { %s } }\n' "$1" >package.json
@@ -46,8 +47,15 @@ if ! "$cli" HEAD; then
 fi
 
 manifest '"yaml": "^1.0.0"'
-if "$cli" HEAD; then
+if output="$("$cli" HEAD 2>&1)"; then
+  echo "$output"
   echo "::error::latest-or-bust passed yaml ^1.0.0, which isn't the newest release"
+  exit 1
+fi
+echo "$output"
+# Failing for another reason (the registry unreachable, a crash) isn't a pass.
+if ! grep -qF 'yaml  ^1.0.0 → ' <<<"$output"; then
+  echo "::error::latest-or-bust failed on yaml ^1.0.0, but didn't report it as behind the newest release"
   exit 1
 fi
 echo "The installed package passes the newest release and fails an old one."

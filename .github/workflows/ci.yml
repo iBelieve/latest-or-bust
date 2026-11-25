@@ -142,7 +142,9 @@ jobs:
   # request's base, or master's previous commit): Fallow changes the code in
   # small ways and runs the tests that cover it against each change. A change
   # no test notices survives, and is annotated on its line. Advisory: some
-  # survivors are equivalent to the original, so they don't fail the job.
+  # survivors are equivalent to the original, so they don't fail the job. The
+  # time budget keeps a large change inside timeout-minutes: Fallow leaves the
+  # mutants it didn't get to pending, and exits 0.
   mutation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -158,7 +160,7 @@ jobs:
           require-lockfile: true
 
       - name: Mutation testing
-        run: pnpm run mutation --base HEAD^
+        run: pnpm run mutation --base HEAD^ --time-budget 20m
 
       - name: Annotate surviving mutants
         run: |
@@ -168,8 +170,8 @@ jobs:
             exit 0
           fi
           jq -r '.mutants[] | select(.status == "survived" or .status == "no_coverage")
-            | "::warning file=\(.file),line=\(.line)::Mutant \(.status): \(.operator) \(.change.from) → \(.change.to) in \(.function); no test fails on it"' "$report"
-          jq -r '.summary.counts | "Mutants: \(.total), killed \(.killed), survived \(.survived), no coverage \(.no_coverage)"' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
+            | "::warning file=\(.file),line=\(.line)::Mutant \(.status): \(.operator) \(.change.from) → \(.change.to) in \(.function // "module scope"); no test fails on it"' "$report"
+          jq -r '.summary.counts | "Mutants: \(.total), killed \(.killed), survived \(.survived), no coverage \(.no_coverage), not run in the time budget \(.pending)"' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Security problems in the workflows (template injection, credentials left
   # in the checkout, unpinned actions, ...), with zizmor's online audits

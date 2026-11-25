@@ -226,6 +226,20 @@ describe("latest-or-bust", () => {
     assert.doesNotMatch(failed.stderr, /No release found/);
   });
 
+  it("says all are exempt when two different dependencies are", async () => {
+    repo.write({ "package.json": {} });
+    repo.commit();
+    repo.write({
+      "latest-or-bust.json": {
+        exempt: { foo: { reason: "testing" }, bar: { reason: "testing" } },
+      },
+      "package.json": { dependencies: { foo: "1.0.0", bar: "1.0.0" } },
+    });
+    const run = await cli(repo.root, ["HEAD"]);
+    assert.equal(run.code, 0, run.stderr);
+    assert.match(run.stdout, /Nothing to check: latest-or-bust\.json exempts all of them\./);
+  });
+
   it("doesn't say all are exempt when one is exempt in two sections and another isn't", async () => {
     repo.write({ "package.json": {} });
     repo.commit();

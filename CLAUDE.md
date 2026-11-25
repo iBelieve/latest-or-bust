@@ -59,11 +59,13 @@ needs a line in its `needs`.
   file no test reaches. No baseline: split the function, or for CRAP, test it
 - `pnpm run mutation --base <ref>` (Fallow's mutation testing): changes the
   lines changed since the ref in small ways and runs the tests that cover
-  them against each change; a change no test fails on survives. CI runs it
-  against `HEAD^` and annotates each survivor on its line, without failing
-  (some survivors are equivalent to the original). Kill a real survivor
-  with a test. `pnpm run mutation --all` mutates everything (slow: the CLI
-  tests take seconds a run)
+  them against each change; a change no test fails on survives. It refuses
+  to run with uncommitted changes, so commit first (or pass
+  `--allow-dirty`). CI runs it against `HEAD^`, within a 20-minute time
+  budget, and annotates each survivor on its line, without failing (some
+  survivors are equivalent to the original). Kill a real survivor with a
+  test. `pnpm run mutation --all` mutates everything (slow: the CLI tests
+  take seconds a run)
 - `pnpm run smoke` (`scripts/smoke-test.sh`): packs the package, installs it
   with npm in a throwaway directory and runs the installed command against
   the real registry, which must pass a dependency at its newest release and
