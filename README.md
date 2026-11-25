@@ -62,8 +62,10 @@ jobs:
 - The root `package.json` and every workspace package's: the `packages` in `pnpm-workspace.yaml`,
   and npm's `workspaces` in the root `package.json` (globs and `!` exclusions included). Other
   `package.json` files, such as test fixtures, are left out.
-- In each, `dependencies`, `devDependencies` and `optionalDependencies`. `peerDependencies` are left
-  out, since they're deliberately wide ranges rather than what gets installed.
+- In each, `dependencies`, `devDependencies` and `optionalDependencies`, each on its own, so a
+  dependency in more than one is checked in each (and the report names the section).
+  `peerDependencies` are left out, since they're deliberately wide ranges rather than what gets
+  installed.
 - pnpm's catalogs, default and named, in `pnpm-workspace.yaml`.
 
 A dependency counts as changed when its version spec changes at all, so a range whose floor isn't the
@@ -76,8 +78,10 @@ which reads your registry settings from `.npmrc`, and honors the package manager
 cooldown, so it never asks for a release your package manager won't install yet:
 
 - npm: `min-release-age` in `.npmrc`
-- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` (a project with `pnpm-workspace.yaml` or
-  `pnpm-lock.yaml` is a pnpm project)
+- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` or pnpm's global config (a project with
+  `pnpm-workspace.yaml` or `pnpm-lock.yaml` is a pnpm project). pnpm 11 and later wait a day when
+  nothing sets it, and so does latest-or-bust, leaving out what `minimumReleaseAgeExclude` names.
+  pnpm's version comes from `packageManager` in `package.json`, else `pnpm --version`.
 
 A dependency it can't look up, because it isn't on the registry or the registry is unreachable or
 refuses the login, fails the check too: there's no telling whether it's the newest.
