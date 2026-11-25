@@ -6,10 +6,11 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { isRecord } from "../src/manifests.ts";
 import { createRepository, startRegistry, type Registry, type Repository } from "./fixtures.ts";
 
-const CLI = new URL("../src/cli.ts", import.meta.url).pathname;
+const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
 interface Run {
   code: number | null;
@@ -114,6 +115,7 @@ describe("latest-or-bust", () => {
   });
 
   it("reports nothing changed", async () => {
+    repo.write({ "package.json": { dependencies: { foo: "1.0.0" } } });
     const base = repo.commit();
     const run = await cli(repo.root, base);
     assert.equal(run.code, 0, run.stderr);

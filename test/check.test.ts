@@ -1,6 +1,8 @@
 // End to end through git and npm-check-updates, against a fake registry.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, beforeEach, afterEach, describe, it } from "node:test";
 import { check, type CheckResult } from "../src/check.ts";
 import { createRepository, startRegistry, type Registry, type Repository } from "./fixtures.ts";
@@ -184,11 +186,59 @@ describe("check", () => {
     assert.deepEqual(outdated(result), ["pnpm-workspace.yaml @scope/bar ^1.0.0 → ^2.0.0"]);
   });
 
-  it("explains that catalogs need pnpm-workspace.yaml's packages", async () => {
-    pnpmProject("");
+  it("judges each catalog's entry by its own spec", async () => {
+    pnpmProject("catalog:\n  foo: 1.0.0\ncatalogs:\n  legacy:\n    foo: ^1.0.0\n");
     const base = repo.commit();
-    pnpmProject("catalog:\n  foo: 1.2.0\n");
-    await assert.rejects(run(base), /lists no packages/);
+    // legacy holds foo back, untouched; next's foo is current; the default's isn't.
+    pnpmProject(
+      "catalog:\n  foo: 1.1.0\ncatalogs:\n  legacy:\n    foo: ^1.0.0\n  next:\n    foo: 1.2.0\n",
+    );
+    const result = await run(base);
+    assert.deepEqual(result.checked, new Map([["pnpm-workspace.yaml", ["foo"]]]));
+    assert.deepEqual(outdated(result), ["pnpm-workspace.yaml foo 1.1.0 → 1.2.0"]);
+  });
+
+  it("checks catalogs without a packages list or pnpm-lock.yaml, with the cooldown", async () => {
+    repo.write({
+      ".npmrc": `registry=${registry.url}\n`,
+      "pnpm-workspace.yaml": "minimumReleaseAge: 1440\ncatalog:\n  foo: 1.0.0\n",
+      "package.json": { name: "root" },
+    });
+    const base = repo.commit();
+    repo.write({ "pnpm-workspace.yaml": "minimumReleaseAge: 1440\ncatalog:\n  foo: 1.1.0\n" });
+    assert.deepEqual(outdated(await run(base)), ["pnpm-workspace.yaml foo 1.1.0 → 1.2.0"]);
+  });
+
+  it("ignores .ncurc options that would change what npm-check-updates does", async () => {
+    npmProject({ workspaces: ["packages/*"] });
+    const base = repo.commit();
+    const manifest = {
+      workspaces: ["packages/*"],
+      devDependencies: { foo: "1.0.0", "@scope/bar": "1.0.0" },
+    };
+    npmProject(manifest, {
+      ".ncurc.json": {
+        reject: ["@scope/bar"],
+        upgrade: true,
+        workspaces: true,
+        dep: "prod",
+        errorLevel: 2,
+        jsonAll: true,
+      },
+      "packages/a/package.json": { name: "a" },
+    });
+    assert.deepEqual(outdated(await run(base)), ["package.json foo 1.0.0 → 1.2.0"]);
+    assert.deepEqual(JSON.parse(readFileSync(join(repo.root, "package.json"), "utf8")), manifest);
+  });
+
+  it("fails when the root has no package.json or pnpm-workspace.yaml", async () => {
+    repo.write({ "web/package.json": { dependencies: {} } });
+    const base = repo.commit();
+    repo.write({ "web/package.json": { dependencies: { foo: "1.0.0" } } });
+    await assert.rejects(
+      run(base),
+      /no package\.json or pnpm-workspace\.yaml at the repository root/,
+    );
   });
 
   it("fails on an unparseable manifest, naming it", async () => {

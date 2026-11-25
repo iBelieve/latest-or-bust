@@ -7,8 +7,8 @@ import { posix } from "node:path";
 import { atRevision, inWorkingTree, packageDirectories } from "./git.ts";
 import {
   catalogSpecs,
+  changedEntries,
   changedNames,
-  hasPackagesList,
   manifestSpecs,
   matchWorkspaces,
   workspacePatterns,
@@ -48,25 +48,11 @@ function parsing<T>(where: string, parse: () => T): T {
   }
 }
 
-/**
- * `name`'s spec in `specs`. npm-check-updates names a catalog entry by its
- * package name alone, so for a catalog this is the default catalog's spec,
- * else the first named catalog's.
- */
-function specFor(specs: Specs, name: string): string {
-  const spec = specs.get(name);
-  if (spec !== undefined) return spec;
-  for (const [key, value] of specs) {
-    if (key.endsWith(`:${name}`)) return value;
-  }
-  return "";
-}
-
 function outdatedIn(file: string, current: Specs, upgrades: Upgrades): Outdated[] {
   return [...upgrades].map(([name, latest]) => ({
     file,
     name,
-    spec: specFor(current, name),
+    spec: current.get(name) ?? "",
     latest,
   }));
 }
@@ -77,17 +63,31 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
   const before = (path: string) => atRevision(root, base, path);
   const now = (path: string) => inWorkingTree(root, path);
 
+  const rootManifest = now("package.json");
   const workspace = now(PNPM_WORKSPACE);
+  const previousWorkspace = before(PNPM_WORKSPACE);
+  if (
+    rootManifest === undefined &&
+    workspace === undefined &&
+    previousWorkspace === undefined &&
+    before("package.json") === undefined
+  ) {
+    // Otherwise a project in a subdirectory would pass without a check.
+    throw new Error(
+      `There's no package.json or ${PNPM_WORKSPACE} at the repository root (${root}), or at ${base}: latest-or-bust checks the project there`,
+    );
+  }
   const patterns = parsing(`the workspace packages in package.json or ${PNPM_WORKSPACE}`, () =>
-    workspacePatterns(now("package.json"), workspace),
+    workspacePatterns(rootManifest, workspace),
   );
   const dirs = [".", ...matchWorkspaces(patterns, packageDirectories(root))];
 
   for (const dir of dirs) {
     // A git path, so always with forward slashes.
     const manifest = posix.join(dir, "package.json");
-    const current = parsing(manifest, () => manifestSpecs(now(manifest)));
-    const previous = parsing(`${manifest} at ${base}`, () => manifestSpecs(before(manifest)));
+    const [text, previousText] = [now(manifest), before(manifest)];
+    const current = parsing(manifest, () => manifestSpecs(text));
+    const previous = parsing(`${manifest} at ${base}`, () => manifestSpecs(previousText));
     const names = changedNames(previous, current);
     if (names.length === 0) continue;
     result.checked.set(manifest, names);
@@ -98,21 +98,17 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
 
   const catalog = parsing(PNPM_WORKSPACE, () => catalogSpecs(workspace));
   const previousCatalog = parsing(`${PNPM_WORKSPACE} at ${base}`, () =>
-    catalogSpecs(before(PNPM_WORKSPACE)),
+    catalogSpecs(previousWorkspace),
   );
   const catalogNames = changedNames(previousCatalog, catalog);
   if (catalogNames.length > 0) {
-    if (!hasPackagesList(workspace)) {
-      // npm-check-updates checks catalogs only in a workspace, and without a
-      // packages list it fails without saying why.
-      throw new Error(
-        `${PNPM_WORKSPACE}'s catalogs changed, but it lists no packages, so npm-check-updates can't check them: add a packages list`,
+    result.checked.set(PNPM_WORKSPACE, catalogNames);
+    // Each catalog on its own, so each entry is judged by its own spec.
+    for (const entries of changedEntries(previousCatalog, catalog).values()) {
+      result.outdated.push(
+        ...outdatedIn(PNPM_WORKSPACE, entries, await catalogUpgrades(options, entries)),
       );
     }
-    result.checked.set(PNPM_WORKSPACE, catalogNames);
-    result.outdated.push(
-      ...outdatedIn(PNPM_WORKSPACE, catalog, await catalogUpgrades(options, catalogNames)),
-    );
   }
   return result;
 }

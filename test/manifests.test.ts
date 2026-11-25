@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   catalogSpecs,
+  changedEntries,
   changedNames,
   manifestSpecs,
   matchWorkspaces,
@@ -123,6 +124,10 @@ describe("matchWorkspaces", () => {
     ]);
   });
 
+  it("takes in a ** pattern's own directory, as npm and pnpm do", () => {
+    assert.deepEqual(matchWorkspaces(["web/**"], ["web", "web/x", "website"]), ["web", "web/x"]);
+  });
+
   it("ignores ./ and trailing slashes", () => {
     assert.deepEqual(matchWorkspaces(["./web/", "./packages/b"], dirs), ["packages/b", "web"]);
   });
@@ -161,5 +166,25 @@ describe("changedNames", () => {
   it("reports a named catalog's entry by its package name, once", () => {
     const head = specMap({ "@types/node": "^26.6.6", "legacy:@types/node": "^22.0.0" });
     assert.deepEqual(changedNames(new Map(), head), ["@types/node"]);
+  });
+});
+
+describe("changedEntries", () => {
+  it("groups changed entries by catalog, keyed by package name", () => {
+    const base = specMap({ "@types/node": "^26.6.6", "legacy:react": "^18.3.1" });
+    const head = specMap({
+      "@types/node": "^26.6.6",
+      "legacy:@types/node": "^22.0.0",
+      "legacy:react": "^18.3.1",
+      "next:react": "^19.3.2",
+      "next:x": "workspace:*",
+    });
+    assert.deepEqual(
+      changedEntries(base, head),
+      new Map([
+        ["legacy", specMap({ "@types/node": "^22.0.0" })],
+        ["next", specMap({ react: "^19.3.2" })],
+      ]),
+    );
   });
 });

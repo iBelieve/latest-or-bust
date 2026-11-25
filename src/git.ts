@@ -11,6 +11,9 @@ function git(cwd: string, args: string[]): string {
 
 function tryGit(cwd: string, args: string[]): string | undefined {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  // Git didn't run at all (it isn't installed, say): that's no answer, so
+  // don't pass it off as "not a repository" or "no such revision".
+  if (result.error !== undefined) throw result.error;
   return result.status === 0 ? result.stdout.trim() : undefined;
 }
 

@@ -46,8 +46,8 @@ export function manifestSpecs(text: string | undefined): Specs {
 
 /**
  * The version specs in pnpm-workspace.yaml's default catalog and named
- * catalogs. A name in more than one catalog is keyed by catalog
- * ("catalog:name"), so a change to any of them counts.
+ * catalogs. The default catalog's are keyed by name, a named catalog's by
+ * "catalog:name", so a change to any of them counts.
  */
 export function catalogSpecs(text: string | undefined): Specs {
   const workspace = parseWorkspace(text);
@@ -89,16 +89,13 @@ export function workspacePatterns(
   ];
 }
 
-/** Whether pnpm-workspace.yaml has a packages list, even an empty one. */
-export function hasPackagesList(pnpmWorkspace: string | undefined): boolean {
-  return Array.isArray(parseWorkspace(pnpmWorkspace)["packages"]);
-}
-
 const normalize = (pattern: string): string =>
   posix.normalize(pattern).replace(/^\.\//, "").replace(/\/+$/, "");
 
+// Matched as npm and pnpm do, by the package.json under each: so
+// "packages/**" takes in "packages" itself too.
 const matchesAny = (dir: string, globs: string[]): boolean =>
-  globs.some((glob) => posix.matchesGlob(dir, glob));
+  globs.some((glob) => posix.matchesGlob(`${dir}/package.json`, `${glob}/package.json`));
 
 /**
  * The directories, out of `candidates` (relative to the root, with forward
@@ -125,17 +122,35 @@ function isRegistrySpec(spec: string): boolean {
 }
 
 /**
+ * The dependencies that `head` adds or changes the version of, by catalog:
+ * each catalog's name ("" for the default catalog, and for a package.json)
+ * to its changed entries, keyed by the bare package name. Removed
+ * dependencies and non-registry specs are left out.
+ */
+export function changedEntries(base: Specs, head: Specs): Map<string, Specs> {
+  const changed = new Map<string, Specs>();
+  for (const [key, spec] of head) {
+    if (base.get(key) === spec || !isRegistrySpec(spec)) continue;
+    // A scoped name's "@" comes first, so a catalog prefix is whatever
+    // precedes the first ":".
+    const colon = key.indexOf(":");
+    const catalog = colon === -1 ? "" : key.slice(0, colon);
+    const entries = changed.get(catalog) ?? new Map<string, string>();
+    entries.set(key.slice(colon + 1), spec);
+    changed.set(catalog, entries);
+  }
+  return changed;
+}
+
+/**
  * The names of dependencies that `head` adds or changes the version of,
  * sorted. Removed dependencies and non-registry specs are left out. Catalog
  * keys of the form "catalog:name" come back as the bare package name.
  */
 export function changedNames(base: Specs, head: Specs): string[] {
   const names = new Set<string>();
-  for (const [key, spec] of head) {
-    if (base.get(key) === spec || !isRegistrySpec(spec)) continue;
-    // A scoped name's "@" comes first, so a catalog prefix is whatever
-    // precedes the first ":".
-    names.add(key.slice(key.indexOf(":") + 1));
+  for (const entries of changedEntries(base, head).values()) {
+    for (const name of entries.keys()) names.add(name);
   }
   return [...names].toSorted();
 }

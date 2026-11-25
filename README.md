@@ -10,7 +10,7 @@ change leaves alone aren't checked, so it never fails a pull request for somethi
 
 ```console
 $ npx latest-or-bust
-Checking dependencies added or changed since origin/main (3c23f15…)
+Checking dependencies added or changed since 3c23f15…
 package.json: hono, react
 packages/web/package.json: vite
 
