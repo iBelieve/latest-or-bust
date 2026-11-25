@@ -15,6 +15,12 @@ const manifest = (sections: Record<string, Record<string, string>>): string =>
 const specMap = (entries: Record<string, string>) => new Map(Object.entries(entries));
 
 describe("manifestSpecs", () => {
+  const empty = {
+    dependencies: new Map(),
+    devDependencies: new Map(),
+    optionalDependencies: new Map(),
+  };
+
   it("reads installed sections and skips peerDependencies", () => {
     const specs = manifestSpecs(
       manifest({
@@ -24,24 +30,29 @@ describe("manifestSpecs", () => {
         peerDependencies: { react: ">=18" },
       }),
     );
-    assert.deepEqual(
-      specs,
-      new Map([
-        ["hono", "^4.13.19"],
-        ["typescript", "catalog:"],
-        ["fsevents", "2.3.3"],
-      ]),
+    assert.deepEqual(specs, {
+      dependencies: specMap({ hono: "^4.13.19" }),
+      devDependencies: specMap({ typescript: "catalog:" }),
+      optionalDependencies: specMap({ fsevents: "2.3.3" }),
+    });
+  });
+
+  it("keeps a name in more than one section in each", () => {
+    const specs = manifestSpecs(
+      manifest({ dependencies: { foo: "^1.0.0" }, devDependencies: { foo: "^2.0.0" } }),
     );
+    assert.deepEqual(specs.dependencies, specMap({ foo: "^1.0.0" }));
+    assert.deepEqual(specs.devDependencies, specMap({ foo: "^2.0.0" }));
   });
 
   it("is empty for a missing file or one without dependencies", () => {
-    assert.equal(manifestSpecs(undefined).size, 0);
-    assert.equal(manifestSpecs('{"name": "x"}').size, 0);
-    assert.equal(manifestSpecs("[]").size, 0);
+    assert.deepEqual(manifestSpecs(undefined), empty);
+    assert.deepEqual(manifestSpecs('{"name": "x"}'), empty);
+    assert.deepEqual(manifestSpecs("[]"), empty);
   });
 
   it("ignores non-string specs", () => {
-    assert.equal(manifestSpecs('{"dependencies": {"x": 1}}').size, 0);
+    assert.deepEqual(manifestSpecs('{"dependencies": {"x": 1}}'), empty);
   });
 });
 
