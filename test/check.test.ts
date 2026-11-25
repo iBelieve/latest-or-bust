@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { after, before, beforeEach, afterEach, describe, it } from "node:test";
 import { check, type CheckResult } from "../src/check.ts";
 import { createRepository, startRegistry, type Registry, type Repository } from "./fixtures.ts";
@@ -258,6 +258,15 @@ describe("check", () => {
     ]);
   });
 
+  it("leaves alone a dependency moved to another section with the same spec", async () => {
+    npmProject({ dependencies: { foo: "1.0.0", baz: "3.0.0" } });
+    const base = repo.commit();
+    npmProject({ dependencies: { baz: "3.0.0" }, devDependencies: { foo: "1.0.0" } });
+    const result = await run(base);
+    assert.equal(result.checked.size, 0);
+    assert.deepEqual(result.outdated, []);
+  });
+
   it("checks a name added to a second section, by the spec there", async () => {
     npmProject({ dependencies: { foo: "1.2.0" } });
     const base = repo.commit();
@@ -276,10 +285,12 @@ describe("check", () => {
       assert.deepEqual(await addFoo("12.21.0+sha512.abc"), []);
     });
 
-    it("takes pnpm's version from pnpm --version without packageManager", async () => {
+    // The fake pnpm is a shell script.
+    const skip = process.platform === "win32";
+    it("takes pnpm's version from pnpm --version without packageManager", { skip }, async () => {
       const bin = mkdtempSync(join(tmpdir(), "latest-or-bust-bin-"));
       const path = process.env["PATH"];
-      process.env["PATH"] = `${bin}:${path ?? ""}`;
+      process.env["PATH"] = `${bin}${delimiter}${path ?? ""}`;
       try {
         for (const [version, flagged] of [
           ["11.0.0", []],
@@ -296,7 +307,8 @@ describe("check", () => {
           assert.deepEqual(outdated(await run(base)), flagged, `pnpm ${version}`);
         }
       } finally {
-        process.env["PATH"] = path;
+        if (path === undefined) delete process.env["PATH"];
+        else process.env["PATH"] = path;
         rmSync(bin, { recursive: true, force: true });
       }
     });
@@ -309,6 +321,19 @@ describe("check", () => {
       const flagged = ["package.json foo 1.2.0 → 1.3.0"];
       assert.deepEqual(await addFoo("11.0.0", "minimumReleaseAge: 0\n"), flagged);
       assert.deepEqual(await addFoo("11.0.0", "minimum-release-age: 60\n"), flagged);
+    });
+
+    it("takes PNPM_CONFIG_MINIMUM_RELEASE_AGE over the default and the global config", async () => {
+      const global = join(configHome, "pnpm", "config.yaml");
+      mkdirSync(join(configHome, "pnpm"), { recursive: true });
+      writeFileSync(global, "minimumReleaseAge: 1440\n");
+      process.env["PNPM_CONFIG_MINIMUM_RELEASE_AGE"] = "0";
+      try {
+        assert.deepEqual(await addFoo("11.0.0"), ["package.json foo 1.2.0 → 1.3.0"]);
+      } finally {
+        delete process.env["PNPM_CONFIG_MINIMUM_RELEASE_AGE"];
+        rmSync(join(configHome, "pnpm"), { recursive: true, force: true });
+      }
     });
 
     it("leaves out what minimumReleaseAgeExclude names", async () => {
@@ -335,13 +360,14 @@ describe("check", () => {
       try {
         repo.write({ "pnpm-lock.yaml": "lockfileVersion: '9.0'\n", "package.json": {} });
         const base = repo.commit();
-        // No .npmrc: the registry comes from the global config.
+        // No .npmrc: the registry comes from the global config. Only the fake
+        // registry has a foo 1.2.0, and the cooldown keeps 1.3.0 out.
         repo.write({
-          "package.json": { packageManager: "pnpm@11.0.0", dependencies: { foo: "1.2.0" } },
+          "package.json": { packageManager: "pnpm@11.0.0", dependencies: { foo: "1.1.0" } },
         });
         const result = await run(base);
         assert.deepEqual(result.notFound, []);
-        assert.deepEqual(outdated(result), []);
+        assert.deepEqual(outdated(result), ["package.json foo 1.1.0 → 1.2.0"]);
       } finally {
         rmSync(join(configHome, "pnpm"), { recursive: true, force: true });
       }

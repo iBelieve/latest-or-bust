@@ -13,8 +13,8 @@ const USAGE = `Usage: latest-or-bust [base revision]
 Fails if a dependency that the working tree adds, or changes the version of,
 since the base revision isn't the newest release npm-check-updates finds
 (after the package manager's release-age cooldown, such as pnpm's
-minimumReleaseAge, a day by default since pnpm 11). Checks the root package.json, every workspace package's,
-and pnpm-workspace.yaml's catalogs.
+minimumReleaseAge, a day by default since pnpm 11). Checks the root
+package.json, every workspace package's, and pnpm-workspace.yaml's catalogs.
 
 The base defaults to where HEAD branched from origin's default branch. On a
 GitHub pull_request run, pass HEAD^ (with actions/checkout's fetch-depth: 2).

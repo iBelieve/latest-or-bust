@@ -69,7 +69,8 @@ jobs:
 - pnpm's catalogs, default and named, in `pnpm-workspace.yaml`.
 
 A dependency counts as changed when its version spec changes at all, so a range whose floor isn't the
-newest release fails too (`^1.1.0` when 1.2.0 is out). Specs that don't name a registry version
+newest release fails too (`^1.1.0` when 1.2.0 is out). A dependency moved to another section with
+the same spec hasn't changed. Specs that don't name a registry version
 (`workspace:`, `catalog:`, `file:`, `link:`, `npm:` aliases, git URLs) are skipped; a catalog's
 entries are checked in the catalog.
 
@@ -78,10 +79,11 @@ which reads your registry settings from `.npmrc`, and honors the package manager
 cooldown, so it never asks for a release your package manager won't install yet:
 
 - npm: `min-release-age` in `.npmrc`
-- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml` or pnpm's global config (a project with
-  `pnpm-workspace.yaml` or `pnpm-lock.yaml` is a pnpm project). pnpm 11 and later wait a day when
-  nothing sets it, and so does latest-or-bust, leaving out what `minimumReleaseAgeExclude` names.
-  pnpm's version comes from `packageManager` in `package.json`, else `pnpm --version`.
+- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml`, `PNPM_CONFIG_MINIMUM_RELEASE_AGE` or pnpm's
+  global config (a project with `pnpm-workspace.yaml` or `pnpm-lock.yaml` is a pnpm project). pnpm
+  11 and later wait a day when nothing sets it, and so does latest-or-bust, leaving out what
+  `minimumReleaseAgeExclude` names. pnpm's version comes from `packageManager` in `package.json`,
+  else `pnpm --version`.
 
 A dependency it can't look up, because it isn't on the registry or the registry is unreachable or
 refuses the login, fails the check too: there's no telling whether it's the newest.
