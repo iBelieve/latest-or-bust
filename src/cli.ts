@@ -13,9 +13,10 @@ const USAGE = `Usage: latest-or-bust [base revision]
 Fails if a dependency that the working tree adds, or changes the version of,
 since the base revision isn't the newest release npm-check-updates finds
 (after the package manager's release-age cooldown, such as pnpm's
-minimumReleaseAge). Checks the root package.json, every workspace package's,
-and the catalogs in pnpm-workspace.yaml, .yarnrc.yml or (Bun's) package.json.
-Works with npm, pnpm, Yarn and Bun.
+minimumReleaseAge, a day by default since pnpm 11). Checks the root
+package.json, every workspace package's, and the catalogs in
+pnpm-workspace.yaml, .yarnrc.yml or (Bun's) package.json. Works with npm,
+pnpm, Yarn and Bun.
 
 The base defaults to where HEAD branched from origin's default branch. On a
 GitHub pull_request run, pass HEAD^ (with actions/checkout's fetch-depth: 2).
@@ -41,9 +42,11 @@ function version(): string {
     : "unknown";
 }
 
-/** A file, with the named catalog when there is one. */
-const where = ({ file, catalog }: Place): string =>
-  catalog === undefined ? file : `${file} (catalog ${catalog})`;
+/** A file, with the named catalog or the package.json section when there is one. */
+function where({ file, catalog, section }: Place): string {
+  if (catalog !== undefined) return `${file} (catalog ${catalog})`;
+  return section === undefined ? file : `${file} (${section})`;
+}
 
 function report(result: CheckResult): boolean {
   if (result.checked.size === 0) {
@@ -70,7 +73,8 @@ function report(result: CheckResult): boolean {
   }
   if (result.outdated.length === 0) {
     if (result.notFound.length > 0) return false;
-    // By name: one can be exempted in several catalogs of a file it's listed once for.
+    // By name, as exemptions are: one can be in more than one section or
+    // catalog of a file, or in package.json's dependencies and its catalogs.
     const unchecked = new Set(
       result.exempted.filter((exempted) => exempted.allow === undefined).map(({ name }) => name),
     );

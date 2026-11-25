@@ -4,7 +4,7 @@
 // package.json). Dependencies the change leaves alone aren't checked: keeping
 // those current is a job for Dependabot or Renovate.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, posix } from "node:path";
 import { CONFIG_FILE, parseConfig, type Config } from "./config.ts";
@@ -13,10 +13,12 @@ import {
   catalogSpecs,
   changedEntries,
   changedNames,
+  MANIFEST_SECTIONS,
   manifestCatalogSpecs,
   manifestSpecs,
   matchWorkspaces,
   workspacePatterns,
+  type Section,
   type Specs,
 } from "./manifests.ts";
 import { newerReleases, type NcuOptions, type NcuQuery, type Upgrades } from "./ncu.ts";
@@ -26,6 +28,7 @@ import {
   MARKER_FILES,
   type Cooldown,
 } from "./packageManager.ts";
+import { defaultCooldownConfig } from "./pnpm.ts";
 
 const byName = (a: { name: string }, b: { name: string }): number => (a.name < b.name ? -1 : 1);
 
@@ -43,6 +46,13 @@ const CATALOGS: [file: string, specs: (text: string | undefined) => Specs][] = [
   ["package.json", manifestCatalogSpecs],
 ];
 
+// npm-check-updates' name for each package.json section.
+const NCU_DEP = {
+  dependencies: "prod",
+  devDependencies: "dev",
+  optionalDependencies: "optional",
+} as const satisfies Record<Section, NcuQuery["dep"]>;
+
 /** Where a dependency is: a file, and for a catalog entry, the catalog when the file doesn't say. */
 export interface Place {
   /** The file it's in, relative to the root. */
@@ -54,6 +64,11 @@ export interface Place {
    * package's own dependencies.
    */
   catalog?: string;
+  /**
+   * The package.json section it's in, when its name is in more than one
+   * section of the file; undefined otherwise.
+   */
+  section?: Section;
 }
 
 export interface Outdated extends Place {
@@ -126,13 +141,13 @@ function bunCooldownAt(root: string): Cooldown {
 }
 
 function outdatedIn(
-  place: Place,
+  placeOf: (name: string) => Place,
   current: Specs,
   upgrades: Upgrades,
   target: NcuQuery["target"],
 ): Outdated[] {
   return [...upgrades].map(([name, latest]) => ({
-    ...place,
+    ...placeOf(name),
     name,
     spec: current.get(name) ?? "",
     latest,
@@ -141,15 +156,21 @@ function outdatedIn(
 }
 
 /**
+ * npm-check-updates' options, worked out the first time it's asked about
+ * something, so a change that touches no dependency doesn't run pnpm.
+ */
+type Ncu = () => Promise<NcuOptions>;
+
+/**
  * Asks about one file's (or catalog's) changed dependencies, minus the
  * exempt ones: those allowed to stay on their major are asked about with
  * target "minor", and the rest aren't asked about at all.
  */
 async function checkFile(
-  ncu: NcuOptions,
+  ncu: Ncu,
   config: Config,
   result: CheckResult,
-  place: Place,
+  placeOf: (name: string) => Place,
   query: Omit<NcuQuery, "names" | "target">,
   changed: Specs,
 ): Promise<void> {
@@ -161,7 +182,7 @@ async function checkFile(
       latest.push(name);
       continue;
     }
-    result.exempted.push({ ...place, name, ...exemption });
+    result.exempted.push({ ...placeOf(name), name, ...exemption });
     if (exemption.allow === "minor") minor.push(name);
   }
   const outdated: Outdated[] = [];
@@ -170,14 +191,86 @@ async function checkFile(
     [latest, "latest"],
     [minor, "minor"],
   ] as const) {
-    const found = await newerReleases(ncu, { ...query, names: [...names], target });
-    outdated.push(...outdatedIn(place, changed, found.upgrades, target));
+    if (names.length === 0) continue;
+    const found = await newerReleases(await ncu(), { ...query, names: [...names], target });
+    outdated.push(...outdatedIn(placeOf, changed, found.upgrades, target));
     for (const name of found.notFound) {
-      notFound.push({ ...place, name, spec: changed.get(name) ?? "" });
+      notFound.push({ ...placeOf(name), name, spec: changed.get(name) ?? "" });
     }
   }
   result.outdated.push(...outdated.toSorted(byName));
   result.notFound.push(...notFound.toSorted(byName));
+}
+
+/** Sorts `list` by name from `start` on. */
+function sortFrom(list: { name: string }[], start: number): void {
+  list.splice(start, list.length - start, ...list.slice(start).toSorted(byName));
+}
+
+/** Checks a package.json (a git path, so with forward slashes), one section at a time. */
+async function checkManifest(
+  ncu: Ncu,
+  config: Config,
+  result: CheckResult,
+  { root, base }: CheckOptions,
+  manifest: string,
+): Promise<void> {
+  const [text, previousText] = [inWorkingTree(root, manifest), atRevision(root, base, manifest)];
+  const current = parsing(manifest, () => manifestSpecs(text));
+  const previous = parsing(`${manifest} at ${base}`, () => manifestSpecs(previousText));
+  // A name in more than one section is reported with the section it's in.
+  const sections = (name: string) =>
+    MANIFEST_SECTIONS.filter((section) => current[section].has(name)).length;
+  const names = new Set<string>();
+  const [outdated, notFound] = [result.outdated.length, result.notFound.length];
+  for (const section of MANIFEST_SECTIONS) {
+    const changed = changedEntries(previous[section], current[section]).get("");
+    if (changed === undefined) continue;
+    // Moved from another section with the same spec: its version didn't change.
+    for (const [name, spec] of changed) {
+      if (MANIFEST_SECTIONS.some((other) => previous[other].get(name) === spec)) {
+        changed.delete(name);
+      }
+    }
+    if (changed.size === 0) continue;
+    for (const name of changed.keys()) names.add(name);
+    const placeOf = (name: string): Place =>
+      sections(name) > 1 ? { file: manifest, section } : { file: manifest };
+    const query = { packageFile: manifest, dep: NCU_DEP[section] };
+    await checkFile(ncu, config, result, placeOf, query, changed);
+  }
+  if (names.size === 0) return;
+  result.checked.set(manifest, [...names].toSorted());
+  // Sorted by name across the sections too.
+  sortFrom(result.outdated, outdated);
+  sortFrom(result.notFound, notFound);
+}
+
+/** Checks the catalogs, each on its own, so each entry is judged by its own spec. */
+async function checkCatalogs(
+  ncu: Ncu,
+  config: Config,
+  result: CheckResult,
+  { root, base }: CheckOptions,
+): Promise<void> {
+  for (const [file, specs] of CATALOGS) {
+    const catalog = parsing(file, () => specs(inWorkingTree(root, file)));
+    const previousCatalog = parsing(`${file} at ${base}`, () =>
+      specs(atRevision(root, base, file)),
+    );
+    const catalogNames = changedNames(previousCatalog, catalog);
+    if (catalogNames.length === 0) continue;
+    // package.json's own dependencies are listed under its name.
+    const isManifest = file === "package.json";
+    result.checked.set(isManifest ? `${file} catalogs` : file, catalogNames);
+    for (const [named, entries] of changedEntries(previousCatalog, catalog)) {
+      // The default catalog's name is "".
+      const name = named === "" && isManifest ? "default" : named;
+      const place: Place = { file, ...(name === "" ? {} : { catalog: name }) };
+      const query = { dependencies: entries, dep: "prod" } as const;
+      await checkFile(ncu, config, result, () => place, query, entries);
+    }
+  }
 }
 
 export async function check(options: CheckOptions): Promise<CheckResult> {
@@ -203,43 +296,35 @@ export async function check(options: CheckOptions): Promise<CheckResult> {
   }
   const present = new Set(MARKER_FILES.filter((file) => existsSync(join(root, file))));
   const packageManager = parsing("package.json", () => detectPackageManager(rootManifest, present));
+  const isPnpm = packageManager === "pnpm";
   // npm-check-updates reads the others' cooldowns itself, but not Bun's. It's
   // passed even when unset: given none, npm-check-updates would take npm's
   // min-release-age from .npmrc, which Bun doesn't read.
   const cooldown = packageManager === "bun" ? bunCooldownAt(root) : undefined;
-  const ncu: NcuOptions = { root, packageManager, ...(cooldown === undefined ? {} : { cooldown }) };
   const patterns = parsing(`the workspace packages in package.json or ${PNPM_WORKSPACE}`, () =>
     workspacePatterns(rootManifest, workspace),
   );
   const dirs = [".", ...matchWorkspaces(patterns, packageDirectories(root))];
-
-  for (const dir of dirs) {
-    // A git path, so always with forward slashes.
-    const manifest = posix.join(dir, "package.json");
-    const [text, previousText] = [now(manifest), before(manifest)];
-    const current = parsing(manifest, () => manifestSpecs(text));
-    const previous = parsing(`${manifest} at ${base}`, () => manifestSpecs(previousText));
-    const changed = changedEntries(previous, current).get("");
-    if (changed === undefined) continue;
-    result.checked.set(manifest, [...changed.keys()].toSorted());
-    await checkFile(ncu, config, result, { file: manifest }, { packageFile: manifest }, changed);
-  }
-
-  for (const [file, specs] of CATALOGS) {
-    const catalog = parsing(file, () => specs(now(file)));
-    const previousCatalog = parsing(`${file} at ${base}`, () => specs(before(file)));
-    const catalogNames = changedNames(previousCatalog, catalog);
-    if (catalogNames.length === 0) continue;
-    // package.json's own dependencies are listed under its name.
-    const isManifest = file === "package.json";
-    result.checked.set(isManifest ? `${file} catalogs` : file, catalogNames);
-    // Each catalog on its own, so each entry is judged by its own spec.
-    for (const [named, entries] of changedEntries(previousCatalog, catalog)) {
-      // The default catalog's name is "".
-      const name = named === "" && isManifest ? "default" : named;
-      const place: Place = { file, ...(name === "" ? {} : { catalog: name }) };
-      await checkFile(ncu, config, result, place, { dependencies: entries }, entries);
-    }
+  let pnpmConfigHome: string | undefined;
+  let ncuOptions: Promise<NcuOptions> | undefined;
+  const ncu: Ncu = () =>
+    (ncuOptions ??= (async (): Promise<NcuOptions> => {
+      pnpmConfigHome = isPnpm
+        ? await defaultCooldownConfig(root, rootManifest, workspace)
+        : undefined;
+      return {
+        root,
+        packageManager,
+        ...(cooldown === undefined ? {} : { cooldown }),
+        ...(pnpmConfigHome === undefined ? {} : { pnpmConfigHome }),
+      };
+    })());
+  try {
+    for (const dir of dirs)
+      await checkManifest(ncu, config, result, options, posix.join(dir, "package.json"));
+    await checkCatalogs(ncu, config, result, options);
+  } finally {
+    if (pnpmConfigHome !== undefined) rmSync(pnpmConfigHome, { recursive: true, force: true });
   }
   return result;
 }

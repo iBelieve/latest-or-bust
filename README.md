@@ -62,13 +62,16 @@ jobs:
 - The root `package.json` and every workspace package's: the `packages` in `pnpm-workspace.yaml`,
   and the `workspaces` in the root `package.json` that npm, Yarn and Bun use (globs and `!`
   exclusions included). Other `package.json` files, such as test fixtures, are left out.
-- In each, `dependencies`, `devDependencies` and `optionalDependencies`. `peerDependencies` are left
-  out, since they're deliberately wide ranges rather than what gets installed.
+- In each, `dependencies`, `devDependencies` and `optionalDependencies`, each on its own, so a
+  dependency in more than one is checked in each (and the report names the section).
+  `peerDependencies` are left out, since they're deliberately wide ranges rather than what gets
+  installed.
 - Catalogs, default and named: pnpm's in `pnpm-workspace.yaml`, Yarn's in `.yarnrc.yml`, and Bun's
   in the root `package.json` (at the top level or in `workspaces`).
 
 A dependency counts as changed when its version spec changes at all, so a range whose floor isn't the
-newest release fails too (`^1.1.0` when 1.2.0 is out). Specs that don't name a registry version
+newest release fails too (`^1.1.0` when 1.2.0 is out). A dependency moved to another section with
+the same spec hasn't changed. Specs that don't name a registry version
 (`workspace:`, `catalog:`, `file:`, `link:`, `npm:` aliases, git URLs) are skipped; a catalog's
 entries are checked in the catalog.
 
@@ -78,7 +81,10 @@ which reads your registry settings from `.npmrc` (and in a Yarn project, the `np
 release your package manager won't install yet:
 
 - npm: `min-release-age` in `.npmrc`
-- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml`
+- pnpm: `minimumReleaseAge` in `pnpm-workspace.yaml`, `PNPM_CONFIG_MINIMUM_RELEASE_AGE` or pnpm's
+  global config. pnpm 11 and later wait a day when nothing sets it, and so does latest-or-bust,
+  leaving out what `minimumReleaseAgeExclude` names. pnpm's version comes from `packageManager` in
+  `package.json`, else `pnpm --version`.
 - Yarn: `npmMinimalAgeGate` in the `.yarnrc.yml` next to `yarn.lock`, or in your home directory
   (Yarn 4.10 and later; Yarn 1 has none)
 - Bun: `minimumReleaseAge` and `minimumReleaseAgeExcludes` in `bunfig.toml`'s `[install]`, or in

@@ -11,7 +11,16 @@ export type Specs = Map<string, string>;
 
 // Sections of package.json whose versions get installed. peerDependencies are
 // left out: they're deliberately wide ranges, not what gets installed.
-const MANIFEST_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"] as const;
+export const MANIFEST_SECTIONS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+] as const;
+
+export type Section = (typeof MANIFEST_SECTIONS)[number];
+
+/** A package.json's version specs, by section. */
+export type ManifestSpecs = Record<Section, Specs>;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -37,12 +46,22 @@ function parseWorkspace(text: string | undefined): Record<string, unknown> {
   return isRecord(workspace) ? workspace : {};
 }
 
-/** The version specs in a package.json; empty when the file doesn't exist. */
-export function manifestSpecs(text: string | undefined): Specs {
+/**
+ * The version specs in a package.json, by section, so a name in more than
+ * one section is compared in each; empty when the file doesn't exist.
+ */
+export function manifestSpecs(text: string | undefined): ManifestSpecs {
   const manifest = parseManifest(text);
-  const specs: Specs = new Map();
-  for (const section of MANIFEST_SECTIONS) addStrings(specs, manifest[section]);
-  return specs;
+  const sectionSpecs = (section: Section): Specs => {
+    const specs: Specs = new Map();
+    addStrings(specs, manifest[section]);
+    return specs;
+  };
+  return {
+    dependencies: sectionSpecs("dependencies"),
+    devDependencies: sectionSpecs("devDependencies"),
+    optionalDependencies: sectionSpecs("optionalDependencies"),
+  };
 }
 
 // Adds the entries of a default `catalog` and named `catalogs`: the default

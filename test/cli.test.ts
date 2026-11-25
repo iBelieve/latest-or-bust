@@ -137,6 +137,21 @@ describe("latest-or-bust", () => {
     assert.match(run.stderr, /exempt it in latest-or-bust\.json with the reason why/);
   });
 
+  it("names the section of a dependency that's in more than one", async () => {
+    repo.write({ "package.json": {} });
+    repo.commit();
+    repo.write({
+      "package.json": { dependencies: { foo: "1.0.0" }, devDependencies: { foo: "1.1.0" } },
+    });
+    const run = await cli(repo.root, "HEAD");
+    assert.equal(run.code, 1);
+    assert.match(run.stdout, /\npackage\.json: foo\n/);
+    assert.match(
+      run.stderr,
+      /Not the newest release:\n {2}package\.json \(dependencies\) {2}foo {2}1\.0\.0 → 1\.1\.0\n\n/,
+    );
+  });
+
   it("fails, listing each dependency it finds no release of", async () => {
     repo.write({ "package.json": { dependencies: {} } });
     repo.commit();
@@ -184,6 +199,21 @@ describe("latest-or-bust", () => {
     const run = await cli(repo.root, "HEAD");
     assert.equal(run.code, 0, run.stderr);
     assert.match(run.stdout, /package\.json catalogs: bar, foo\n/);
+    assert.match(run.stdout, /All of them are the newest release\./);
+  });
+
+  it("doesn't say all are exempt when one is exempt in two sections and another isn't", async () => {
+    repo.write({ "package.json": {} });
+    repo.commit();
+    repo.write({
+      "latest-or-bust.json": { exempt: { foo: { reason: "testing" } } },
+      "package.json": {
+        dependencies: { foo: "1.0.0", bar: "1.0.0" },
+        devDependencies: { foo: "1.0.0" },
+      },
+    });
+    const run = await cli(repo.root, "HEAD");
+    assert.equal(run.code, 0, run.stderr);
     assert.match(run.stdout, /All of them are the newest release\./);
   });
 });

@@ -15,8 +15,11 @@ the tests run the TypeScript directly. See `README.md` for what it checks.
   lookup fails the check) and options pinned, so a project's `.ncurc` can't
   change what it does. `src/packageManager.ts`: which package manager a
   project uses, and Bun's cooldown from `bunfig.toml` (npm-check-updates
-  reads npm's, pnpm's and Yarn's itself, not Bun's). `src/check.ts` ties
-  them together; `src/cli.ts` is the command
+  reads npm's, pnpm's and Yarn's itself, not Bun's). `src/pnpm.ts`: pnpm
+  11+'s default `minimumReleaseAge`, which npm-check-updates only applies
+  when it's set, given to it as a copy of pnpm's global config.
+  `src/check.ts` ties them together, asking about each package.json section
+  on its own; `src/cli.ts` is the command
 - latest-or-bust's own config is the interface; npm-check-updates is an
   implementation detail that could be swapped out, so don't expose its
   options

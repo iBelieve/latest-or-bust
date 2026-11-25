@@ -47,6 +47,11 @@ export interface NcuOptions {
    * doesn't read itself (Bun's).
    */
   cooldown?: Cooldown;
+  /**
+   * The directory to read pnpm's global config.yaml from (as
+   * XDG_CONFIG_HOME/pnpm), in place of the user's: see pnpm.ts.
+   */
+  pnpmConfigHome?: string;
 }
 
 /** What to ask about: dependencies of a package.json, or of a package's data. */
@@ -55,6 +60,8 @@ export interface NcuQuery {
   packageFile?: string;
   /** Dependency name to spec, checked as a package's dependencies. */
   dependencies?: Specs;
+  /** The section they're in: dependencies, devDependencies or optionalDependencies. */
+  dep: "prod" | "dev" | "optional";
   names: string[];
   /** "minor" for the newest release on each one's current major. */
   target: "latest" | "minor";
@@ -101,6 +108,9 @@ interface Output {
 function ncuOutput(options: NcuOptions, args: string[]): Promise<Output> {
   const child = spawn(process.execPath, [ncuCli(), ...args, ...pinnedOptions(options.root)], {
     cwd: options.root,
+    ...(options.pnpmConfigHome === undefined
+      ? {}
+      : { env: { ...process.env, XDG_CONFIG_HOME: options.pnpmConfigHome } }),
     // File descriptor 3 is where ncurc.mjs names the packages it found.
     stdio: ["ignore", "pipe", "inherit", "pipe"],
   });
@@ -184,9 +194,9 @@ export async function newerReleases(options: NcuOptions, query: NcuQuery): Promi
       ...source,
       "--packageManager",
       options.packageManager,
-      // The sections latest-or-bust compares.
+      // One section at a time: a name can be in more than one.
       "--dep",
-      "prod,dev,optional",
+      query.dep,
       "--target",
       query.target,
       "--filter",
