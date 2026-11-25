@@ -1,16 +1,23 @@
 // End to end through git and npm-check-updates, against a fake registry.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { after, before, beforeEach, afterEach, describe, it } from "node:test";
 import { check, type CheckResult } from "../src/check.ts";
 import { createRepository, startRegistry, type Registry, type Repository } from "./fixtures.ts";
 
 let registry: Registry;
 let repo: Repository;
+// pnpm's global config dir is XDG_CONFIG_HOME/pnpm: a throwaway one, so the
+// machine's doesn't change what the tests find.
+let configHome: string;
+const savedConfigHome = process.env["XDG_CONFIG_HOME"];
 
 before(async () => {
+  configHome = mkdtempSync(join(tmpdir(), "latest-or-bust-config-"));
+  process.env["XDG_CONFIG_HOME"] = configHome;
   registry = await startRegistry({
     // The newest, 1.3.0, is younger than the 1-day cooldowns below.
     foo: [
@@ -29,7 +36,12 @@ before(async () => {
   });
 });
 
-after(() => registry.close());
+after(async () => {
+  await registry.close();
+  rmSync(configHome, { recursive: true, force: true });
+  if (savedConfigHome === undefined) delete process.env["XDG_CONFIG_HOME"];
+  else process.env["XDG_CONFIG_HOME"] = savedConfigHome;
+});
 
 beforeEach(() => {
   repo = createRepository();
@@ -63,6 +75,24 @@ const run = (base: string): Promise<CheckResult> => check({ root: repo.root, bas
 /** The outdated dependencies, as "file name spec → latest". */
 const outdated = (result: CheckResult): string[] =>
   result.outdated.map(({ file, name, spec, latest }) => `${file} ${name} ${spec} → ${latest}`);
+
+/** A pnpm project on pnpm `version`, whose pnpm-workspace.yaml is `workspace`. */
+function pnpmOn(version: string, workspace: string, dependencies: object): void {
+  repo.write({
+    ".npmrc": `registry=${registry.url}\n`,
+    "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+    "pnpm-workspace.yaml": workspace,
+    "package.json": { packageManager: `pnpm@${version}`, dependencies },
+  });
+}
+
+/** What a pnpm project on pnpm `version` flags when it adds foo 1.2.0; its newest, 1.3.0, is younger than a day. */
+async function addFoo(version: string, workspace = ""): Promise<string[]> {
+  pnpmOn(version, workspace, {});
+  const base = repo.commit();
+  pnpmOn(version, workspace, { foo: "1.2.0" });
+  return outdated(await run(base));
+}
 
 describe("check", () => {
   it("passes, without asking the registry, when no dependency changed", async () => {
@@ -209,6 +239,139 @@ describe("check", () => {
     });
     // Not "1.2.0 → 1.3.0": 1.3.0 is younger than a day.
     assert.deepEqual(outdated(await run(base)), []);
+  });
+
+  it("compares a name in more than one section in each", async () => {
+    npmProject({ dependencies: { foo: "1.0.0" }, devDependencies: { foo: "1.0.0" } });
+    const base = repo.commit();
+    npmProject({ dependencies: { foo: "1.1.0" }, devDependencies: { foo: "1.0.0", baz: "3.0.0" } });
+    const result = await run(base);
+    assert.deepEqual(result.checked, new Map([["package.json", ["baz", "foo"]]]));
+    assert.deepEqual(result.outdated, [
+      {
+        file: "package.json",
+        section: "dependencies",
+        name: "foo",
+        spec: "1.1.0",
+        latest: "1.2.0",
+      },
+    ]);
+  });
+
+  it("leaves alone a dependency moved to another section with the same spec", async () => {
+    npmProject({ dependencies: { foo: "1.0.0", baz: "3.0.0" } });
+    const base = repo.commit();
+    npmProject({ dependencies: { baz: "3.0.0" }, devDependencies: { foo: "1.0.0" } });
+    const result = await run(base);
+    assert.equal(result.checked.size, 0);
+    assert.deepEqual(result.outdated, []);
+  });
+
+  it("checks a name added to a second section, by the spec there", async () => {
+    npmProject({ dependencies: { foo: "1.2.0" } });
+    const base = repo.commit();
+    npmProject({ dependencies: { foo: "1.2.0" }, optionalDependencies: { foo: "1.0.0" } });
+    assert.deepEqual(
+      (await run(base)).outdated.map(
+        ({ section, spec, latest }) => `${String(section)} ${spec} → ${latest}`,
+      ),
+      ["optionalDependencies 1.0.0 → 1.2.0"],
+    );
+  });
+
+  describe("pnpm's default minimumReleaseAge", () => {
+    it("applies on pnpm 11 and later when nothing sets one", async () => {
+      assert.deepEqual(await addFoo("11.0.0"), []);
+      assert.deepEqual(await addFoo("12.21.0+sha512.abc"), []);
+    });
+
+    // The fake pnpm is a shell script.
+    const skip = process.platform === "win32";
+    it("takes pnpm's version from pnpm --version without packageManager", { skip }, async () => {
+      const bin = mkdtempSync(join(tmpdir(), "latest-or-bust-bin-"));
+      const path = process.env["PATH"];
+      process.env["PATH"] = `${bin}${delimiter}${path ?? ""}`;
+      try {
+        for (const [version, flagged] of [
+          ["11.0.0", []],
+          ["10.5.0", ["package.json foo 1.2.0 → 1.3.0"]],
+        ] as const) {
+          writeFileSync(join(bin, "pnpm"), `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+          repo.write({
+            ".npmrc": `registry=${registry.url}\n`,
+            "pnpm-workspace.yaml": "",
+            "package.json": {},
+          });
+          const base = repo.commit();
+          repo.write({ "package.json": { dependencies: { foo: "1.2.0" } } });
+          assert.deepEqual(outdated(await run(base)), flagged, `pnpm ${version}`);
+        }
+      } finally {
+        if (path === undefined) delete process.env["PATH"];
+        else process.env["PATH"] = path;
+        rmSync(bin, { recursive: true, force: true });
+      }
+    });
+
+    it("doesn't apply before pnpm 11", async () => {
+      assert.deepEqual(await addFoo("10.28.0"), ["package.json foo 1.2.0 → 1.3.0"]);
+    });
+
+    it("gives way to one pnpm-workspace.yaml sets", async () => {
+      const flagged = ["package.json foo 1.2.0 → 1.3.0"];
+      assert.deepEqual(await addFoo("11.0.0", "minimumReleaseAge: 0\n"), flagged);
+      assert.deepEqual(await addFoo("11.0.0", "minimum-release-age: 60\n"), flagged);
+    });
+
+    it("takes PNPM_CONFIG_MINIMUM_RELEASE_AGE over the default and the global config", async () => {
+      const global = join(configHome, "pnpm", "config.yaml");
+      mkdirSync(join(configHome, "pnpm"), { recursive: true });
+      writeFileSync(global, "minimumReleaseAge: 1440\n");
+      process.env["PNPM_CONFIG_MINIMUM_RELEASE_AGE"] = "0";
+      try {
+        assert.deepEqual(await addFoo("11.0.0"), ["package.json foo 1.2.0 → 1.3.0"]);
+      } finally {
+        delete process.env["PNPM_CONFIG_MINIMUM_RELEASE_AGE"];
+        rmSync(join(configHome, "pnpm"), { recursive: true, force: true });
+      }
+    });
+
+    it("leaves out what minimumReleaseAgeExclude names", async () => {
+      assert.deepEqual(await addFoo("11.0.0", "minimumReleaseAgeExclude:\n  - foo\n"), [
+        "package.json foo 1.2.0 → 1.3.0",
+      ]);
+    });
+
+    it("gives way to one pnpm's global config sets, and leaves that file alone", async () => {
+      const global = join(configHome, "pnpm", "config.yaml");
+      mkdirSync(join(configHome, "pnpm"), { recursive: true });
+      writeFileSync(global, "minimumReleaseAge: 0\n");
+      try {
+        assert.deepEqual(await addFoo("11.0.0"), ["package.json foo 1.2.0 → 1.3.0"]);
+        assert.equal(readFileSync(global, "utf8"), "minimumReleaseAge: 0\n");
+      } finally {
+        rmSync(join(configHome, "pnpm"), { recursive: true, force: true });
+      }
+    });
+
+    it("keeps the global config's other settings, such as the registry", async () => {
+      mkdirSync(join(configHome, "pnpm"), { recursive: true });
+      writeFileSync(join(configHome, "pnpm", "config.yaml"), `registry: ${registry.url}\n`);
+      try {
+        repo.write({ "pnpm-lock.yaml": "lockfileVersion: '9.0'\n", "package.json": {} });
+        const base = repo.commit();
+        // No .npmrc: the registry comes from the global config. Only the fake
+        // registry has a foo 1.2.0, and the cooldown keeps 1.3.0 out.
+        repo.write({
+          "package.json": { packageManager: "pnpm@11.0.0", dependencies: { foo: "1.1.0" } },
+        });
+        const result = await run(base);
+        assert.deepEqual(result.notFound, []);
+        assert.deepEqual(outdated(result), ["package.json foo 1.1.0 → 1.2.0"]);
+      } finally {
+        rmSync(join(configHome, "pnpm"), { recursive: true, force: true });
+      }
+    });
   });
 
   it("checks npm workspace packages, new ones too, and nothing outside them", async () => {
