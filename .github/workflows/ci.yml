@@ -1,0 +1,142 @@
+name: CI
+
+# Every check, on every push to master and every pull request. The last job,
+# all-green, passes only if every other job did, so it can be the one
+# required status check: adding or renaming a job needs no change to branch
+# protection, only a line in its needs.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel superseded runs on PR branches only; let every master commit finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  ACTIONLINT_VERSION: "1.7.12"
+
+jobs:
+  # Formatting, type checks, lint and the build, on the Node.js from
+  # .node-version; then latest-or-bust checks its own pull requests.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The dependency check compares a pull request's merge commit with
+          # HEAD^, its base.
+          fetch-depth: 2
+
+      # Installs the pnpm from package.json's packageManager, Node.js from
+      # .node-version, and runs pnpm install --frozen-lockfile.
+      - id: setup
+        uses: pnpm/setup@v3
+        with:
+          cache: true
+          require-lockfile: true
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+      - name: Type check
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run typecheck
+
+      - name: Lint
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run lint
+
+      - id: build
+        name: Build
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run build
+
+      # Pull requests only, against their base: on master the change has
+      # already been checked. Not Dependabot's: its grouped minor-and-patch
+      # PRs don't move a dependency to a new major version even when one is
+      # out, so they'd fail this.
+      - name: Check that new dependencies are the newest release
+        if: >-
+          (success() || failure()) && steps.build.outcome == 'success' &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.user.login != 'dependabot[bot]'
+        run: node dist/cli.js HEAD^
+
+  # The tests, on every Node.js release line package.json's engines allows.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24", "26"]
+    name: test (Node.js ${{ matrix.node }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/setup@v3
+        with:
+          runtime: node@${{ matrix.node }}
+          cache: true
+          require-lockfile: true
+
+      - name: Test
+        run: pnpm test
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # Also runs shellcheck (preinstalled on the runner) over run: steps.
+      - name: Install actionlint
+        run: bash <(curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") "$ACTIONLINT_VERSION"
+
+      - name: Lint workflows
+        run: ./actionlint -color
+
+  all-green:
+    name: All green
+    needs:
+      - check
+      - test
+      - actionlint
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/workflows/ci.yml
+          sparse-checkout-cone-mode: false
+
+      # yq is preinstalled on the runner.
+      - name: Check every job is listed under needs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          missing="$(comm -23 \
+            <(yq '.jobs | keys | .[]' .github/workflows/ci.yml | grep -vx all-green | sort) \
+            <(jq -r 'keys[]' <<<"$NEEDS" | sort))"
+          if [ -n "$missing" ]; then
+            echo "::error::Add these jobs to all-green's needs: $missing"
+            exit 1
+          fi
+
+      - name: Check every job passed
+        if: success() || failure()
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::Jobs that didn't pass:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All jobs passed."
