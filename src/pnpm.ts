@@ -18,7 +18,7 @@ import { parse, stringify } from "yaml";
 import { isRecord } from "./manifests.ts";
 
 /** pnpm's default minimumReleaseAge, in minutes, since pnpm 11. */
-export const DEFAULT_MINIMUM_RELEASE_AGE = 1440;
+const DEFAULT_MINIMUM_RELEASE_AGE = 1440;
 
 /** Where pnpm, and npm-check-updates, find pnpm's global config.yaml. */
 export function pnpmConfigDir(

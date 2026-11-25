@@ -152,6 +152,14 @@ one it can't look up. Put the registry in `.npmrc` too (Bun reads it as well), o
 
 Node.js 22.22.2 or later on the 22 line, 24.15.0 or later on the 24 line, or 26 and later; and git.
 
+## Development
+
+`pnpm install`, then `pnpm run typecheck`, `pnpm run lint`, `pnpm run fallow` (dead code and
+duplication), `pnpm test` (including fast-check property tests), `pnpm run test:coverage` and
+`pnpm run health` (complexity and CRAP scores), `pnpm run mutation --base origin/master` (mutation
+testing of what a branch changes), `pnpm run smoke` (the packed package, against the real registry)
+and `pnpm run format:check`. CI runs all of them; `CLAUDE.md` says what each one checks.
+
 ## License
 
 MIT

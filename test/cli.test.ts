@@ -48,6 +48,11 @@ before(async () => {
       ["1.1.0", 20],
     ],
     bar: [["1.0.0", 30]],
+    baz: [
+      ["1.0.0", 30],
+      ["1.1.0", 20],
+      ["2.0.0", 10],
+    ],
   });
 });
 
@@ -190,6 +195,48 @@ describe("latest-or-bust", () => {
       run.stdout,
       /Exempt in latest-or-bust\.json:\n {2}package\.json {2}foo {2}\(not checked: foo 1\.1 breaks us\)\n/,
     );
+    assert.match(run.stdout, /Nothing to check: latest-or-bust\.json exempts all of them\./);
+  });
+
+  it("holds a dependency allowed to stay on its major to the newest release there", async () => {
+    repo.write({
+      "package.json": {},
+      "latest-or-bust.json": {
+        exempt: { baz: { reason: "baz 2 drops Node.js 22", allow: "minor" } },
+      },
+    });
+    repo.commit();
+    repo.write({ "package.json": { dependencies: { baz: "^1.1.0" } } });
+    const passed = await cli(repo.root, ["HEAD"]);
+    assert.equal(passed.code, 0, passed.stderr);
+    assert.match(
+      passed.stdout,
+      /\n {2}package\.json {2}baz {2}\(newest on its major: baz 2 drops Node\.js 22\)\n/,
+    );
+    assert.match(passed.stdout, /All of them are the newest release\./);
+    assert.equal(passed.stderr, "");
+
+    repo.write({ "package.json": { dependencies: { baz: "^1.0.0" } } });
+    const failed = await cli(repo.root, ["HEAD"]);
+    assert.equal(failed.code, 1);
+    assert.match(
+      failed.stderr,
+      /\n {2}package\.json {2}baz {2}\^1\.0\.0 → \^1\.1\.0 \(the newest on its major, as latest-or-bust\.json allows\)\n/,
+    );
+    assert.doesNotMatch(failed.stderr, /No release found/);
+  });
+
+  it("says all are exempt when two different dependencies are", async () => {
+    repo.write({ "package.json": {} });
+    repo.commit();
+    repo.write({
+      "latest-or-bust.json": {
+        exempt: { foo: { reason: "testing" }, bar: { reason: "testing" } },
+      },
+      "package.json": { dependencies: { foo: "1.0.0", bar: "1.0.0" } },
+    });
+    const run = await cli(repo.root, ["HEAD"]);
+    assert.equal(run.code, 0, run.stderr);
     assert.match(run.stdout, /Nothing to check: latest-or-bust\.json exempts all of them\./);
   });
 

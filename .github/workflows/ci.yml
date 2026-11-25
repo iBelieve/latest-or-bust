@@ -20,20 +20,24 @@ concurrency:
 
 env:
   ACTIONLINT_VERSION: "1.7.12"
+  ZIZMOR_VERSION: "1.33.1"
 
 jobs:
-  # Formatting, type checks, lint and the build, on the Node.js from
-  # .node-version; then latest-or-bust checks its own dependencies.
+  # Formatting, type checks, lint, dead code and the build, on the Node.js
+  # from .node-version; then the package as npm would publish it, and
+  # latest-or-bust checks its own dependencies.
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Installs the pnpm from package.json's packageManager, Node.js from
       # .node-version, and runs pnpm install --frozen-lockfile.
       - id: setup
-        uses: pnpm/setup@v3
+        uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
         with:
           cache: true
           require-lockfile: true
@@ -48,6 +52,12 @@ jobs:
       - name: Lint
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run lint
+
+      # Fallow: unused files, exports and dependencies, import cycles, and
+      # duplicated code.
+      - name: Dead code and duplication
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run fallow
 
       - id: build
         name: Build
@@ -69,6 +79,13 @@ jobs:
             fi
           done
 
+      # Installs the packed package with npm and runs it against the real
+      # registry: it must pass a dependency at its newest release and fail
+      # an old one.
+      - name: Smoke-test the packed package
+        if: (success() || failure()) && steps.build.outcome == 'success'
+        run: pnpm run smoke
+
       # It works out what to check on its own: a pull request against its
       # base (fetching that into the shallow clone), and on master or from
       # Dependabot, nothing.
@@ -86,9 +103,11 @@ jobs:
         node: ["22", "24", "26"]
     name: test (Node.js ${{ matrix.node }})
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/setup@v3
+      - uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
         with:
           runtime: node@${{ matrix.node }}
           cache: true
@@ -97,11 +116,87 @@ jobs:
       - name: Test
         run: pnpm test
 
+  # Complexity, and CRAP scores (complexity weighed against test coverage)
+  # from the tests' V8 coverage, subprocesses included; fails on any function
+  # over the limits, and on a source file no test reaches.
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
+        with:
+          cache: true
+          require-lockfile: true
+
+      - name: Test with coverage
+        run: pnpm run test:coverage
+
+      - name: Complexity and CRAP scores
+        run: pnpm run health
+
+  # Mutation testing of the lines this change touches (against HEAD^: a pull
+  # request's base, or master's previous commit): Fallow changes the code in
+  # small ways and runs the tests that cover it against each change. A change
+  # no test notices survives, and is annotated on its line. Advisory: some
+  # survivors are equivalent to the original, so they don't fail the job. The
+  # time budget keeps a large change inside timeout-minutes: Fallow leaves the
+  # mutants it didn't get to pending, and exits 0.
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
+        with:
+          cache: true
+          require-lockfile: true
+
+      - name: Mutation testing
+        run: pnpm run mutation --base HEAD^ --time-budget 20m
+
+      - name: Annotate surviving mutants
+        run: |
+          report=.fallow/mutation/last-report.json
+          if [ ! -f "$report" ]; then
+            echo "No mutants: the change touches no tested source code."
+            exit 0
+          fi
+          jq -r '.mutants[] | select(.status == "survived" or .status == "no_coverage")
+            | "::warning file=\(.file),line=\(.line)::Mutant \(.status): \(.operator) \(.change.from) → \(.change.to) in \(.function // "module scope"); no test fails on it"' "$report"
+          jq -r '.summary.counts | "Mutants: \(.total), killed \(.killed), survived \(.survived), no coverage \(.no_coverage), not run in the time budget \(.pending)"' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # Security problems in the workflows (template injection, credentials left
+  # in the checkout, unpinned actions, ...), with zizmor's online audits
+  # (known-vulnerable actions, impostor commits) through the job's token.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # pipx is preinstalled on the runner.
+      - name: Audit workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run "zizmor==${ZIZMOR_VERSION}" --format github .github/workflows
+
   actionlint:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Also runs shellcheck (preinstalled on the runner) over run: steps.
       - name: Install actionlint
@@ -110,20 +205,28 @@ jobs:
       - name: Lint workflows
         run: ./actionlint -color
 
+      # shellcheck is preinstalled on the runner.
+      - name: Lint shell scripts
+        run: shellcheck scripts/*.sh
+
   all-green:
     name: All green
     needs:
       - check
       - test
+      - health
+      - mutation
+      - zizmor
       - actionlint
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/workflows/ci.yml
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       # yq is preinstalled on the runner.
       - name: Check every job is listed under needs
