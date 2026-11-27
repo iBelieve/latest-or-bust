@@ -45,16 +45,11 @@ describe("parseConfig", () => {
     );
   });
 
-  it("promotes develop into main or master unless it's told otherwise", () => {
-    const defaults = [
-      { from: "develop", into: "main" },
+  it("reads promotions, with none unless they're listed", () => {
+    assert.deepEqual(parseConfig(undefined).promotions, []);
+    assert.deepEqual(parse({ exempt: {} }).promotions, []);
+    assert.deepEqual(parse({ promotions: [{ from: "develop", into: "master" }] }).promotions, [
       { from: "develop", into: "master" },
-    ];
-    assert.deepEqual(parseConfig(undefined).promotions, defaults);
-    assert.deepEqual(parse({ exempt: {} }).promotions, defaults);
-    assert.deepEqual(parse({ promotions: [] }).promotions, []);
-    assert.deepEqual(parse({ promotions: [{ from: "next", into: "main" }] }).promotions, [
-      { from: "next", into: "main" },
     ]);
   });
 
@@ -75,6 +70,14 @@ describe("parseConfig", () => {
     assert.throws(
       () => parse({ promotions: [{ from: "a", into: "b", to: "c" }] }),
       /unknown key in promotions\[0\]: to/,
+    );
+    assert.throws(
+      () => parse({ promotions: [{ from: "develop ", into: "main" }] }),
+      /promotions\[0\]\.from must be a branch name/,
+    );
+    assert.throws(
+      () => parse({ promotions: [{ from: "refs/heads/develop", into: "main" }] }),
+      /promotions\[0\]\.from must be the branch's short name \(develop\), not a ref/,
     );
   });
 

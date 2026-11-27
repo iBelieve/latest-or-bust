@@ -15,10 +15,11 @@
 //
 // "promotions" lists the pull requests that merge one long-lived branch into
 // another, which aren't checked: their dependencies were checked on the way
-// into the first branch. It defaults to develop into main or master; [] checks
-// every pull request.
+// into the first branch, which assumes changes reach it only by pull request.
+// There are none unless it's set, so every pull request (but Dependabot's and
+// Renovate's) is checked:
 //
-//   { "promotions": [{ "from": "next", "into": "main" }] }
+//   { "promotions": [{ "from": "develop", "into": "master" }] }
 
 import { isRecord } from "./manifests.ts";
 
@@ -35,12 +36,6 @@ export interface Promotion {
   from: string;
   into: string;
 }
-
-/** Promotions when latest-or-bust.json doesn't list any. */
-export const DEFAULT_PROMOTIONS: readonly Promotion[] = [
-  { from: "develop", into: "main" },
-  { from: "develop", into: "master" },
-];
 
 export interface Config {
   /** Package name to its exemption. */
@@ -69,8 +64,16 @@ function exemption(name: string, value: unknown): Exemption {
   return { reason, allow };
 }
 
+/** A branch's short name, as a pull request's payload gives it: no refs/heads/, no spaces around it. */
 function branch(value: unknown, where: string): string {
-  if (typeof value !== "string" || value.trim() === "") fail(`${where} must be a branch name`);
+  if (typeof value !== "string" || value.trim() === "" || value.trim() !== value) {
+    fail(`${where} must be a branch name`);
+  }
+  if (value.startsWith("refs/")) {
+    fail(
+      `${where} must be the branch's short name (${value.replace(/^refs\/(heads\/)?/, "")}), not a ref`,
+    );
+  }
   return value;
 }
 
@@ -87,9 +90,9 @@ function promotions(value: unknown): Promotion[] {
   });
 }
 
-/** Parses latest-or-bust.json; an empty config when there isn't one. */
+/** Parses latest-or-bust.json; no exemptions or promotions when there isn't one. */
 export function parseConfig(text: string | undefined): Config {
-  const config: Config = { exempt: new Map(), promotions: DEFAULT_PROMOTIONS };
+  const config: Config = { exempt: new Map(), promotions: [] };
   if (text === undefined) return config;
   let value: unknown;
   try {

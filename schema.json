@@ -28,7 +28,7 @@
       }
     },
     "promotions": {
-      "description": "Pull requests that promote one branch into another, which aren't checked on GitHub Actions: their dependencies were checked on the way into the first branch. Defaults to develop into main or master; [] checks every pull request.",
+      "description": "Pull requests that promote one branch into another, which aren't checked on GitHub Actions: their dependencies were checked on the way into the first branch. This relies on changes reaching the first branch only by pull request. None unless listed.",
       "type": "array",
       "items": {
         "type": "object",

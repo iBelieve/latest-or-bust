@@ -93,6 +93,14 @@ function payload(pr: PullRequest, branches: Branches = {}): object {
   };
 }
 
+const DEVELOP = [
+  { from: "develop", into: "main" },
+  { from: "develop", into: "master" },
+];
+
+/** Promotions that fail the test if they're read. */
+const unread = () => assert.fail("read the promotions");
+
 describe("detect", () => {
   it("leaves it to the caller outside GitHub Actions", () => {
     upstream.commit();
@@ -192,11 +200,11 @@ describe("detect", () => {
     }
   });
 
-  it("doesn't check a pull request that promotes develop into main or master", () => {
+  it("doesn't check a pull request that's one of the promotions", () => {
     const pr = pullRequest();
     for (const base of ["main", "master"]) {
       const env = environment("pull_request", payload(pr, { head: "develop", base }), pr.merge);
-      const detected = detect(upstream.root, env);
+      const detected = detect(upstream.root, env, () => DEVELOP);
       assert.ok(detected !== undefined && "skip" in detected);
       assert.match(
         detected.skip,
@@ -207,42 +215,47 @@ describe("detect", () => {
     }
   });
 
-  it("checks other pull requests into main, and develop's into other branches", () => {
+  it("checks other pull requests, and the promoted branch's into other branches", () => {
     const pr = pullRequest();
     const clone = checkout("refs/pull/1/merge");
     for (const branches of [{ head: "feature" }, { head: "develop", base: "release" }]) {
       const env = environment("pull_request", payload(pr, branches), pr.merge);
-      const detected = detect(clone, env);
+      const detected = detect(clone, env, () => DEVELOP);
       assert.ok(detected !== undefined && "base" in detected, JSON.stringify(branches));
     }
   });
 
-  it("checks a pull request from a fork's develop", () => {
+  it("checks a pull request from a fork's branch of the same name", () => {
     const pr = pullRequest();
     const clone = checkout("refs/pull/1/merge");
     for (const fork of ["someone/app", null]) {
       const env = environment("pull_request", payload(pr, { head: "develop", fork }), pr.merge);
-      const detected = detect(clone, env);
+      const detected = detect(clone, env, () => DEVELOP);
       assert.ok(detected !== undefined && "base" in detected, String(fork));
     }
   });
 
-  it("takes the promotions it's given instead", () => {
+  it("checks every pull request when there are no promotions, as by default", () => {
     const pr = pullRequest();
     const clone = checkout("refs/pull/1/merge");
-    const promotions = [{ from: "next", into: "main" }];
-    const skipped = detect(
-      clone,
-      environment("pull_request", payload(pr, { head: "next" }), pr.merge),
-      promotions,
-    );
-    assert.ok(skipped !== undefined && "skip" in skipped);
-    assert.match(skipped.skip, /promotes next into main/);
     const develop = environment("pull_request", payload(pr, { head: "develop" }), pr.merge);
-    const checked = detect(clone, develop, promotions);
-    assert.ok(checked !== undefined && "base" in checked);
-    const none = detect(clone, develop, []);
-    assert.ok(none !== undefined && "base" in none);
+    for (const detected of [detect(clone, develop), detect(clone, develop, () => [])]) {
+      assert.ok(detected !== undefined && "base" in detected);
+    }
+  });
+
+  it("reads the promotions only for a pull request from a branch of its own", () => {
+    const pr = pullRequest();
+    const clone = checkout("refs/pull/1/merge");
+    detect(clone, environment("push"), unread);
+    const bot = environment("pull_request", payload(pr, { author: "dependabot[bot]" }), pr.merge);
+    detect(clone, bot, unread);
+    const fork = environment(
+      "pull_request",
+      payload(pr, { head: "develop", fork: null }),
+      pr.merge,
+    );
+    detect(clone, fork, unread);
   });
 
   it("fails on an event payload without a pull request", () => {

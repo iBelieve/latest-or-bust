@@ -5,10 +5,11 @@ it's below 1.0, a minor version may change behaviour.
 
 ## Unreleased
 
-- On GitHub Actions, a pull request from `develop` into `main` or `master` passes without a check,
-  like a push: its dependencies were checked on their way into `develop`. Pull requests from a
-  fork's `develop` are still checked. `promotions` in `latest-or-bust.json` names other branches
-  (`[{ "from": "next", "into": "main" }]`), or turns this off (`[]`).
+- `promotions` in `latest-or-bust.json` lists the branches you release by merging into another,
+  such as `[{ "from": "develop", "into": "master" }]`. On GitHub Actions, a pull request between
+  them passes without a check, like a push: its dependencies were checked on their way into
+  `develop`, if they came by pull request (pushes to `develop` aren't checked). A pull request from
+  a fork's branch of that name is still checked. There are none unless you list them.
 
 ## 0.2.0
 

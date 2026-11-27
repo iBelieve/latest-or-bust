@@ -22,9 +22,9 @@ pnpm, Yarn and Bun.
 The base defaults to where HEAD branched from origin's default branch. On
 GitHub Actions, it's the pull request's base on a pull_request run, and any
 other run (a push, say) has nothing to check and passes, as do pull requests
-from Dependabot and Renovate, and pull requests that promote develop into main
-or master (the "promotions" in latest-or-bust.json). Pass a base revision to
-check against it regardless.
+from Dependabot and Renovate, and pull requests between the branches that
+latest-or-bust.json lists as "promotions" (develop into master, say). Pass a
+base revision to check against it regardless.
 
 To hold a dependency back on purpose, exempt it in latest-or-bust.json at the
 repository root, with the reason why:
@@ -141,7 +141,7 @@ async function main(args: string[]): Promise<boolean> {
   const root = repositoryRoot(process.cwd());
   const detected =
     first === undefined
-      ? detect(root, process.env, parseConfig(inWorkingTree(root, CONFIG_FILE)).promotions)
+      ? detect(root, process.env, () => parseConfig(inWorkingTree(root, CONFIG_FILE)).promotions)
       : undefined;
   if (detected !== undefined && "skip" in detected) {
     console.log(detected.skip);

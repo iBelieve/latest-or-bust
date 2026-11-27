@@ -1,10 +1,10 @@
 // On GitHub Actions, the base to compare with when none is passed: a
 // pull_request run compares with the pull request's base, and any other run
 // has nothing to check, nor does a pull request that promotes one branch into
-// another (develop into main, say).
+// another that latest-or-bust.json lists (develop into master, say).
 
 import { readFileSync } from "node:fs";
-import { DEFAULT_PROMOTIONS, type Promotion } from "./config.ts";
+import type { Promotion } from "./config.ts";
 import { ensureCommit, mergeBase, parents, resolveCommit } from "./git.ts";
 import { isRecord } from "./manifests.ts";
 
@@ -78,12 +78,13 @@ function pullRequest(eventPath: string | undefined): PullRequest {
 /**
  * On GitHub Actions, what a run compares with when it isn't told: a
  * pull_request run's base, or nothing for any other event, or for a pull
- * request that's one of the promotions. Undefined elsewhere.
+ * request that's one of the promotions (read from latest-or-bust.json only
+ * when they matter). Undefined elsewhere.
  */
 export function detect(
   root: string,
   env: Environment,
-  promotions: readonly Promotion[] = DEFAULT_PROMOTIONS,
+  promotions: () => readonly Promotion[] = () => [],
 ): Detected | undefined {
   if (env["GITHUB_ACTIONS"] !== "true") return undefined;
   const event = env["GITHUB_EVENT_NAME"];
@@ -104,10 +105,11 @@ export function detect(
     };
   }
   // Only a branch in the repository itself: a fork's develop wasn't checked
-  // on its way in.
+  // on its way in. The promotions are read only now, so a run that has
+  // nothing to check anyway doesn't depend on latest-or-bust.json.
   if (
     pr.sameRepository &&
-    promotions.some(({ from, into }) => from === pr.headRef && into === pr.baseRef)
+    promotions().some(({ from, into }) => from === pr.headRef && into === pr.baseRef)
   ) {
     return {
       skip: `Pull request #${pr.number} promotes ${pr.headRef} into ${pr.baseRef}, whose dependencies were checked on their way into ${pr.headRef}, so it isn't checked. Pass a base revision to check it anyway.`,
