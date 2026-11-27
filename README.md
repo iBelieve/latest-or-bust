@@ -69,6 +69,16 @@ jobs:
 - Pull requests from Dependabot and Renovate pass too. Their grouped minor-and-patch pull requests
   don't move a dependency to a new major version even when one is out, so they'd fail the check for
   doing what they're set up to do.
+- So does a pull request that promotes `develop` into `main` or `master`, as in a git-flow release.
+  Its dependencies were checked by the pull requests that brought them into `develop`, and newer
+  releases may have come out since, so checking them again would fail a release for nothing it
+  changed. Only a branch in the repository itself counts, not a fork's. List your own branches as
+  `promotions` in `latest-or-bust.json`, which replaces the default (`[]` checks every pull
+  request):
+
+  ```json
+  { "promotions": [{ "from": "next", "into": "main" }] }
+  ```
 
 Pass a base revision to skip all of this and compare with it (`npx latest-or-bust origin/main`).
 Outside GitHub Actions, it always compares with the base revision, or where `HEAD` branched from

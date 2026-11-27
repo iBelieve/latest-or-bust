@@ -55,7 +55,7 @@ describe("parseConfig", () => {
     fc.assert(
       fc.property(
         exemptions,
-        unknownKey(["$schema", "exempt"]),
+        unknownKey(["$schema", "exempt", "promotions"]),
         fc.jsonValue(),
         (exempt, key, value) => {
           assert.throws(() => parseConfig(JSON.stringify({ exempt, [key]: value })), /unknown key/);

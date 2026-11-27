@@ -45,6 +45,39 @@ describe("parseConfig", () => {
     );
   });
 
+  it("promotes develop into main or master unless it's told otherwise", () => {
+    const defaults = [
+      { from: "develop", into: "main" },
+      { from: "develop", into: "master" },
+    ];
+    assert.deepEqual(parseConfig(undefined).promotions, defaults);
+    assert.deepEqual(parse({ exempt: {} }).promotions, defaults);
+    assert.deepEqual(parse({ promotions: [] }).promotions, []);
+    assert.deepEqual(parse({ promotions: [{ from: "next", into: "main" }] }).promotions, [
+      { from: "next", into: "main" },
+    ]);
+  });
+
+  it("refuses promotions that aren't pairs of branches", () => {
+    assert.throws(
+      () => parse({ promotions: { from: "a", into: "b" } }),
+      /promotions must be an array/,
+    );
+    assert.throws(() => parse({ promotions: ["develop"] }), /promotions\[0\] must be an object/);
+    assert.throws(
+      () => parse({ promotions: [{ from: "develop" }] }),
+      /promotions\[0\]\.into must be a branch name/,
+    );
+    assert.throws(
+      () => parse({ promotions: [{ from: " ", into: "main" }] }),
+      /promotions\[0\]\.from must be a branch name/,
+    );
+    assert.throws(
+      () => parse({ promotions: [{ from: "a", into: "b", to: "c" }] }),
+      /unknown key in promotions\[0\]: to/,
+    );
+  });
+
   it("refuses what isn't an object, or isn't JSON", () => {
     assert.throws(() => parse([]), /latest-or-bust\.json: must be an object/);
     assert.throws(() => parse({ exempt: [] }), /exempt must be an object/);

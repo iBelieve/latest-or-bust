@@ -5,6 +5,11 @@ it's below 1.0, a minor version may change behaviour.
 
 ## Unreleased
 
+- On GitHub Actions, a pull request from `develop` into `main` or `master` passes without a check,
+  like a push: its dependencies were checked on their way into `develop`. Pull requests from a
+  fork's `develop` are still checked. `promotions` in `latest-or-bust.json` names other branches
+  (`[{ "from": "next", "into": "main" }]`), or turns this off (`[]`).
+
 ## 0.2.0
 
 Yarn and Bun support, and no setup needed on GitHub Actions with `actions/checkout`'s defaults.

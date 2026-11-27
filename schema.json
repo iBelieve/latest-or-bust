@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/iBelieve/latest-or-bust/blob/master/schema.json",
   "title": "latest-or-bust.json",
-  "description": "latest-or-bust's config: the dependencies held back on purpose.",
+  "description": "latest-or-bust's config: the dependencies held back on purpose, and the pull requests between branches that aren't checked.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -23,6 +23,27 @@
           "allow": {
             "description": "\"minor\": it may stay on its current major, but must be the newest release there. Left out: it isn't checked at all.",
             "enum": ["minor"]
+          }
+        }
+      }
+    },
+    "promotions": {
+      "description": "Pull requests that promote one branch into another, which aren't checked on GitHub Actions: their dependencies were checked on the way into the first branch. Defaults to develop into main or master; [] checks every pull request.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "into"],
+        "properties": {
+          "from": {
+            "description": "The pull request's head branch.",
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "into": {
+            "description": "The pull request's base branch.",
+            "type": "string",
+            "pattern": "\\S"
           }
         }
       }
