@@ -327,5 +327,47 @@ describe("latest-or-bust", () => {
       assert.match(run.stdout, new RegExp(`since main, pull request #7's base \\(${base}\\)\n`));
       assert.match(run.stderr, /package\.json {2}foo {2}1\.0\.0 → 1\.1\.0/);
     });
+
+    /** A pull request from `from` into main that adds an outdated foo, with `config` on both sides. */
+    function promotion(from: string, config?: object): Record<string, string> {
+      repo.write({ "package.json": {}, ...(config ? { "latest-or-bust.json": config } : {}) });
+      const base = repo.commit();
+      repo.git("checkout", "--quiet", "-b", from);
+      repo.write({ "package.json": { dependencies: { foo: "1.0.0" } } });
+      const head = repo.commit();
+      repo.git("checkout", "--quiet", "--detach", base);
+      repo.git("merge", "--quiet", "--no-ff", "--message", "Merge", from);
+      const repository = { full_name: "acme/app" };
+      return github("pull_request", {
+        pull_request: {
+          number: 7,
+          user: { login: "someone" },
+          base: { ref: "main", sha: base, repo: repository },
+          head: { ref: from, sha: head, repo: repository },
+        },
+      });
+    }
+
+    it("passes a pull request that's one of the promotions in latest-or-bust.json", async () => {
+      const config = { promotions: [{ from: "develop", into: "main" }] };
+      const run = await cli(repo.root, [], promotion("develop", config));
+      assert.equal(run.code, 0, run.stderr);
+      assert.match(run.stdout, /^Pull request #7 promotes develop into main, whose dependencies/);
+      assert.doesNotMatch(run.stdout, /Checking/);
+    });
+
+    it("checks a pull request from develop into main without promotions", async () => {
+      const run = await cli(repo.root, [], promotion("develop"));
+      assert.equal(run.code, 1);
+      assert.match(run.stderr, /package\.json {2}foo {2}1\.0\.0 → 1\.1\.0/);
+    });
+
+    it("doesn't read latest-or-bust.json on a run with nothing to check", async () => {
+      repo.write({ "package.json": {}, "latest-or-bust.json": { future: true } });
+      repo.commit();
+      const run = await cli(repo.root, [], github("push"));
+      assert.equal(run.code, 0, run.stderr);
+      assert.match(run.stdout, /^Not a pull request/);
+    });
   });
 });

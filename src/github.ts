@@ -1,8 +1,10 @@
 // On GitHub Actions, the base to compare with when none is passed: a
 // pull_request run compares with the pull request's base, and any other run
-// has nothing to check.
+// has nothing to check, nor does a pull request that promotes one branch into
+// another that latest-or-bust.json lists (develop into master, say).
 
 import { readFileSync } from "node:fs";
+import type { Promotion } from "./config.ts";
 import { ensureCommit, mergeBase, parents, resolveCommit } from "./git.ts";
 import { isRecord } from "./manifests.ts";
 
@@ -23,7 +25,17 @@ interface PullRequest {
   author: string;
   baseRef: string;
   baseSha: string;
+  /** Undefined if the payload leaves it out, when it can't be a promotion. */
+  headRef: string | undefined;
   headSha: string;
+  /** Whether the head branch is in the base's repository rather than a fork. */
+  sameRepository: boolean;
+}
+
+/** A repository's owner/name in the payload; undefined for a fork that's gone. */
+function repository(branch: Record<string, unknown>): string | undefined {
+  const repo = branch["repo"];
+  return isRecord(repo) && typeof repo["full_name"] === "string" ? repo["full_name"] : undefined;
 }
 
 /** The pull request in a pull_request event's payload (the file at GITHUB_EVENT_PATH). */
@@ -57,16 +69,23 @@ function pullRequest(eventPath: string | undefined): PullRequest {
     author: user["login"],
     baseRef: base["ref"],
     baseSha: base["sha"],
+    headRef: typeof head["ref"] === "string" ? head["ref"] : undefined,
     headSha: head["sha"],
+    sameRepository: repository(head) !== undefined && repository(head) === repository(base),
   };
 }
 
 /**
  * On GitHub Actions, what a run compares with when it isn't told: a
- * pull_request run's base, or nothing for any other event. Undefined
- * elsewhere.
+ * pull_request run's base, or nothing for any other event, or for a pull
+ * request that's one of the promotions (read from latest-or-bust.json only
+ * when they matter). Undefined elsewhere.
  */
-export function detect(root: string, env: Environment): Detected | undefined {
+export function detect(
+  root: string,
+  env: Environment,
+  promotions: () => readonly Promotion[] = () => [],
+): Detected | undefined {
   if (env["GITHUB_ACTIONS"] !== "true") return undefined;
   const event = env["GITHUB_EVENT_NAME"];
   if (event === "pull_request_target") {
@@ -83,6 +102,17 @@ export function detect(root: string, env: Environment): Detected | undefined {
   if (BOTS.has(pr.author)) {
     return {
       skip: `Pull request #${pr.number} is from ${pr.author}, which updates dependencies a step at a time, so it isn't checked. Pass a base revision to check it anyway.`,
+    };
+  }
+  // Only a branch in the repository itself: a fork's develop wasn't checked
+  // on its way in. The promotions are read only now, so a run that has
+  // nothing to check anyway doesn't depend on latest-or-bust.json.
+  if (
+    pr.sameRepository &&
+    promotions().some(({ from, into }) => from === pr.headRef && into === pr.baseRef)
+  ) {
+    return {
+      skip: `Pull request #${pr.number} promotes ${pr.headRef} into ${pr.baseRef}, whose dependencies were checked on their way into ${pr.headRef}, so it isn't checked. Pass a base revision to check it anyway.`,
     };
   }
   const head = resolveCommit(root, "HEAD");

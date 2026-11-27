@@ -5,6 +5,12 @@ it's below 1.0, a minor version may change behaviour.
 
 ## Unreleased
 
+- `promotions` in `latest-or-bust.json` lists the branches you release by merging into another,
+  such as `[{ "from": "develop", "into": "master" }]`. On GitHub Actions, a pull request between
+  them passes without a check, like a push: its dependencies were checked on their way into
+  `develop`, if they came by pull request (pushes to `develop` aren't checked). A pull request from
+  a fork's branch of that name is still checked. There are none unless you list them.
+
 ## 0.2.0
 
 Yarn and Bun support, and no setup needed on GitHub Actions with `actions/checkout`'s defaults.
